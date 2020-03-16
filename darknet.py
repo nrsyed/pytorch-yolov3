@@ -7,7 +7,28 @@ import torch.nn.functional as F
 
 class EmptyLayer(torch.nn.Module):
     def __init__(self):
-        super(EmptyLayer, self).__init__()
+        super().__init__()
+
+
+class MaxPool2dPad(torch.nn.MaxPool2d):
+    """
+    Hacked MaxPool2d class to replicate "same" padding; refer to
+    https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
+    """
+    def forward(self, input_):
+        if self.kernel_size == 2 and self.stride == 1:
+            zero_pad = torch.nn.ZeroPad2d((0, 1, 0, 1))
+            input_ = zero_pad(input_)
+        return F.max_pool2d(
+            input_, self.kernel_size, self.stride, self.padding,
+            self.dilation, self.ceil_mode, self.return_indices
+        )
+
+
+class YOLOLayer(torch.nn.Module):
+    def __init__(self, anchors):
+        super().__init__()
+        self.anchors = anchors
 
 
 def parse_config(fpath):
@@ -57,6 +78,7 @@ def parse_config(fpath):
         block = {"type": text_block[0][1:-1]}
         for line in text_block[1:]:
             key, raw_val = line.split("=")
+            key = key.strip()
 
             # Convert fields with multiple comma-separated values into lists.
             if "," in raw_val:
@@ -64,9 +86,19 @@ def parse_config(fpath):
             else:
                 val = str2type(raw_val.strip())
 
+            # If this is a "route" or "shortcut" block, its "layers" field
+            # contains either a single integer or several integers. If single
+            # integer, make it a list for convenience (avoids having to check
+            # type when creating modules and running net.forward(), etc.).
+            if (
+                block["type"] in ("route", "shortcut")
+                and key == "layers"
+                and isinstance(val, int)
+            ):
+                val = [val]
+
             # If this is a "yolo" block, it contains an "anchors" field
             # consisting of pairs of anchors; group anchors into chunks of two.
-            key = key.strip()
             if key == "anchors":
                 val = [val[i:i+2] for i in range(0, len(val), 2)]
 
@@ -115,20 +147,22 @@ def blocks2modules(blocks, net_info):
 
             # Update the number of current (output) channels.
             curr_out_channels = out_channels
+        
+        elif block["type"] == "maxpool":
+            stride = block["stride"]
+            maxpool = MaxPool2dPad(
+                kernel_size=block["size"], stride=stride
+            )
+            pdb.set_trace()
+            module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
             module.add_module("route_{}".format(i), EmptyLayer())
 
-            # If the value of "layers" is a list (of multiple layers),
-            # concatenate the number of channels from each specified layer.
-            # Else the value of "layers" will be an int corresponding to a
-            # single layer.
-            if isinstance(block["layers"], list):
-                out_channels = sum(
-                    out_channels_list[layer_idx] for layer_idx in block["layers"]
-                )
-            else:
-                out_channels = out_channels_list[block["layers"]]
+            out_channels = sum(
+                out_channels_list[layer_idx] for layer_idx in block["layers"]
+            )
+
             curr_out_channels = out_channels
 
         elif block["type"] == "shortcut":
@@ -143,16 +177,63 @@ def blocks2modules(blocks, net_info):
             module.add_module("upsample_{}".format(i), upsample)
 
         elif block["type"] == "yolo":
-            import pdb; pdb.set_trace()
+            anchors = [block["anchors"][idx] for idx in block["mask"]]
+            module.add_module("yolo_{}".format(i), YOLOLayer(anchors))
 
         modules.append(module)
         prev_layer_out_channels = curr_out_channels
         out_channels_list.append(curr_out_channels)
-    print(out_channels_list)
 
-    return None
+    return modules
 
+
+class Darknet(torch.nn.Module):
+    def __init__(self, config_fpath):
+        super().__init__()
+        self.blocks, self.net_info = parse_config(config_fpath)
+        self.modules_ = blocks2modules(self.blocks, self.net_info)
+
+        # Determine the indices of the layers that will have to be cached
+        # for route and shortcut connections.
+        self.blocks_to_cache = set()
+        for i, block in enumerate(self.blocks):
+            if block["type"] in ("route", "shortcut"):
+                # Replace negative values to reflect absolute (positive) block idx.
+                for j, block_idx in enumerate(block["layers"]):
+                    if block_idx < 0:
+                        block["layers"][j] = i + block_idx
+                        self.blocks_to_cache.add(i + block_idx)
+                    else:
+                        self.blocks_to_cache.add(block_idx)
+
+    def forward(self, x):
+        cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
+
+        for i, block in enumerate(self.blocks):
+            if block["type"] in ("convolutional", "maxpool", "upsample"):
+                x = self.modules_[i](x)
+            elif block["type"] == "route":
+                x = torch.cat(
+                    tuple(cached_outputs[idx] for idx in block["layers"]),
+                    dim=1
+                )
+            elif block["type"] == "shortcut":
+                # TODO
+                pass
+            elif block["type"] == "yolo":
+                pass
+
+            if i in cached_outputs:
+                cached_outputs[i] = x
+
+            print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
+
+        return x
 
 if __name__ == "__main__":
-    blocks, net_info = parse_config("yolov3-tiny.cfg")
-    modules = blocks2modules(blocks, net_info)
+    config_path = "yolov3-tiny.cfg"
+    #blocks, net_info = parse_config(config_path)
+    #modules = blocks2modules(blocks, net_info)
+    net = Darknet(config_path)
+    x = torch.ones(1, 3, 416, 416)
+    y = net.forward(x)
