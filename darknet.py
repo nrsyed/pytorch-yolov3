@@ -144,6 +144,9 @@ def blocks2modules(blocks, net_info):
             if block["activation"] == "leaky":
                 acti = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
                 module.add_module("leaky_{}".format(i), acti)
+            elif block["activation"] == "linear":
+                # NOTE: Darknet src files specify "linear" vs "relu".
+                acti = torch.nn.ReLU(inplace=True)
 
             # Update the number of current (output) channels.
             curr_out_channels = out_channels
@@ -153,7 +156,6 @@ def blocks2modules(blocks, net_info):
             maxpool = MaxPool2dPad(
                 kernel_size=block["size"], stride=stride
             )
-            pdb.set_trace()
             module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
@@ -167,6 +169,13 @@ def blocks2modules(blocks, net_info):
 
         elif block["type"] == "shortcut":
             module.add_module("shortcut_{}".format(i), EmptyLayer())
+
+            if "activation" in block:
+                if block["activation"] == "leaky":
+                    acti = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
+                    module.add_module("leaky_{}".format(i), acti)
+                elif block["activation"] == "linear":
+                    acti = torch.nn.ReLU(inplace=True)
 
         elif block["type"] == "upsample":
             # TODO: Upsample is deprecated in favor of Interpolate; consider
@@ -225,8 +234,6 @@ class Darknet(torch.nn.Module):
 
             if i in cached_outputs:
                 cached_outputs[i] = x
-
-            print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
 
         return x
 
