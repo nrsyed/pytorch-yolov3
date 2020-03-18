@@ -26,9 +26,53 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    def __init__(self, anchors):
+    """
+    NOTE: the number of object classes can be deduced from the anchors and
+    anchor mask and does not need to be explicitly provided or stored as part
+    of this class.
+    """
+
+    def __init__(self, anchors, mask):
         super().__init__()
-        self.anchors = anchors
+        self.mask = mask
+        self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
+
+    def forward(self, x):
+        num_anchors = len(self.anchors)
+        num_samples, num_predictions, h, w = x.shape
+        num_classes = int(num_predictions / num_anchors) - 5
+        x = x.reshape((num_samples, num_anchors, num_classes + 5, h, w))
+
+        # bbox xywh, objectness, and class energies.
+        xywh_energy = x[:, :, 0:4, :, :]
+        obj_energy = x[:, :, 4:5, :, :]
+        class_energy = x[:, :, 5:, :, :]
+
+        bbox_xywh = torch.Tensor(xywh_energy)
+
+        # Cell offsets C_x and C_y.
+        cx = torch.linspace(0, w - 1, w).repeat(h, 1)
+        cy = torch.linspace(0, h - 1, h).repeat(w, 1).t().contiguous()
+
+        # Get bbox center x and y coordinates.
+        bbox_xywh[:, :, 0, :, :].sigmoid_().add_(cx).div_(w)
+        bbox_xywh[:, :, 1, :, :].sigmoid_().add_(cy).div_(h)
+
+        # Anchor priors P_w and P_h.
+        anchors = self.anchors
+        anchor_w = torch.Tensor(anchors)[:, 0].reshape(1, num_anchors, 1, 1)
+        anchor_h = torch.Tensor(anchors)[:, 1].reshape(1, num_anchors, 1, 1)
+
+        # Get bbox width and height.
+        bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w).div_(w)
+        bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_w).div_(h)
+
+        obj_score = torch.Tensor(obj_energy).sigmoid()
+
+        class_scores = F.softmax(torch.Tensor(class_energy), dim=2)
+
+        max_class_score, max_class_idx = torch.max(class_scores, 2, keepdim=True)
+        max_class_score.mul_(obj_score)
 
 
 def parse_config(fpath):
@@ -186,8 +230,8 @@ def blocks2modules(blocks, net_info):
             module.add_module("upsample_{}".format(i), upsample)
 
         elif block["type"] == "yolo":
-            anchors = [block["anchors"][idx] for idx in block["mask"]]
-            module.add_module("yolo_{}".format(i), YOLOLayer(anchors))
+            yolo = YOLOLayer(block["anchors"], block["mask"])
+            module.add_module("yolo_{}".format(i), yolo)
 
         modules.append(module)
         prev_layer_out_channels = curr_out_channels
@@ -218,6 +262,7 @@ class Darknet(torch.nn.Module):
     def forward(self, x):
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
+        bboxes = []
         for i, block in enumerate(self.blocks):
             if block["type"] in ("convolutional", "maxpool", "upsample"):
                 x = self.modules_[i](x)
@@ -230,10 +275,12 @@ class Darknet(torch.nn.Module):
                 # TODO
                 pass
             elif block["type"] == "yolo":
-                pass
+                bboxes.append(self.modules_[i](x))
 
             if i in cached_outputs:
                 cached_outputs[i] = x
+
+            #print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
 
         return x
 
