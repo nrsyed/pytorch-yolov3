@@ -1,6 +1,7 @@
 import pdb
 import re
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -281,13 +282,44 @@ class Darknet(torch.nn.Module):
                 cached_outputs[i] = x
 
             #print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
-
         return x
+
+    def load_weights(self, weights_path):
+        """
+        Refer to
+        https://blog.paperspace.com/how-to-implement-a-yolo-v3-object-detector-from-scratch-in-pytorch-part-3/
+        """
+        with open(weights_path, "rb") as f:
+            header = np.fromfile(f, dtype=np.int32, count=5)
+            self.header = header
+            weights = np.fromfile(f, dtype=np.float32)
+
+            weights_ptr = 0
+            for block, module in zip(self.blocks, self.modules_):
+                if block["type"] == "convolutional":
+                    # Only "convolutional" blocks have weights.
+                    if "batch_normalize" in block and block["batch_normalize"]:
+                        # Convolutional blocks with batch norm have weights
+                        # stored in the following order: bn biases, bn weights,
+                        # bn running mean, bn running var, conv weights.
+
+                        bn = module[1]
+                        num_bn_biases = bn.bias.numel()
+
+                    else:
+                        # Convolutional blocks without batch norm have weights
+                        # stored in the following order: conv biases, conv weights.
+                        pass
+
+
+                pdb.set_trace()
+
 
 if __name__ == "__main__":
     config_path = "yolov3-tiny.cfg"
     #blocks, net_info = parse_config(config_path)
     #modules = blocks2modules(blocks, net_info)
     net = Darknet(config_path)
-    x = torch.ones(1, 3, 416, 416)
-    y = net.forward(x)
+    net.load_weights("yolov3-tiny.weights")
+    #x = torch.ones(1, 3, 416, 416)
+    #y = net.forward(x)
