@@ -131,12 +131,12 @@ def parse_config(fpath):
             else:
                 val = str2type(raw_val.strip())
 
-            # If this is a "route" or "shortcut" block, its "layers" field
+            # If this is a "route" block, its "layers" field
             # contains either a single integer or several integers. If single
             # integer, make it a list for convenience (avoids having to check
             # type when creating modules and running net.forward(), etc.).
             if (
-                block["type"] in ("route", "shortcut")
+                block["type"] == "route"
                 and key == "layers"
                 and isinstance(val, int)
             ):
@@ -222,9 +222,11 @@ def blocks2modules(blocks, net_info):
                 elif block["activation"] == "linear":
                     acti = torch.nn.ReLU(inplace=True)
 
+            curr_out_channels = out_channels + out_channels_list[i + block["from"]]
+
         elif block["type"] == "upsample":
-            # TODO: Upsample is deprecated in favor of Interpolate; consider
-            # using this and/or other interpolation methods?
+            # NOTE: torch.nn.Upsample is deprecated in favor of Interpolate;
+            # consider using this and/or other interpolation methods?
             upsample = torch.nn.Upsample(
                 scale_factor=block["stride"], mode="nearest"
             )
@@ -251,7 +253,7 @@ class Darknet(torch.nn.Module):
         # for route and shortcut connections.
         self.blocks_to_cache = set()
         for i, block in enumerate(self.blocks):
-            if block["type"] in ("route", "shortcut"):
+            if block["type"] == "route":
                 # Replace negative values to reflect absolute (positive) block idx.
                 for j, block_idx in enumerate(block["layers"]):
                     if block_idx < 0:
@@ -259,6 +261,13 @@ class Darknet(torch.nn.Module):
                         self.blocks_to_cache.add(i + block_idx)
                     else:
                         self.blocks_to_cache.add(block_idx)
+            elif block["type"] == "shortcut":
+                # "shortcut" layer concatenates the feature map from the
+                # previous block with the feature map specified by the shortcut
+                # block's "from" field (which is a negative integer/offset).
+                self.blocks_to_cache.add(i - 1)
+                self.blocks_to_cache.add(i + block["from"])
+
 
     def forward(self, x):
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
@@ -273,8 +282,10 @@ class Darknet(torch.nn.Module):
                     dim=1
                 )
             elif block["type"] == "shortcut":
-                # TODO
-                pass
+                x = torch.cat(
+                    (cached_outputs[i - 1], cached_outputs[i + block["from"]]),
+                    dim=1
+                )
             elif block["type"] == "yolo":
                 bboxes.append(self.modules_[i](x))
 
@@ -294,9 +305,13 @@ class Darknet(torch.nn.Module):
             self.header = header
             weights = np.fromfile(f, dtype=np.float32)
 
-            weights_ptr = 0
+            # Index (pointer) to position in weights array.
+            p = 0
+
             for block, module in zip(self.blocks, self.modules_):
                 if block["type"] == "convolutional":
+                    conv = module[0]
+
                     # Only "convolutional" blocks have weights.
                     if "batch_normalize" in block and block["batch_normalize"]:
                         # Convolutional blocks with batch norm have weights
@@ -304,22 +319,61 @@ class Darknet(torch.nn.Module):
                         # bn running mean, bn running var, conv weights.
 
                         bn = module[1]
-                        num_bn_biases = bn.bias.numel()
+                        bn_len = bn.bias.numel()
 
+                        bn_biases = torch.from_numpy(weights[p:p + bn_len])
+                        bn.bias.data.copy_(bn_biases.view_as(bn.bias.data))
+                        p += bn_len
+
+                        bn_weights = torch.from_numpy(weights[p:p + bn_len])
+                        bn.weight.data.copy_(bn_weights.view_as(bn.weight.data))
+                        p += bn_len
+
+                        bn_running_mean = torch.from_numpy(weights[p:p + bn_len])
+                        bn.running_mean.copy_(
+                            bn_running_mean.view_as(bn.running_mean)
+                        )
+                        p += bn_len
+
+                        bn_running_var = torch.from_numpy(weights[p:p + bn_len])
+                        bn.running_var.copy_(
+                            bn_running_var.view_as(bn.running_var)
+                        )
+                        p += bn_len
+
+                        
                     else:
                         # Convolutional blocks without batch norm have weights
                         # stored in the following order: conv biases, conv weights.
-                        pass
+                        num_conv_biases = conv.bias.numel()
+                        conv_biases = torch.from_numpy(weights[p:p + num_conv_biases])
+                        conv.bias.data.copy_(conv_biases.view_as(conv.bias.data))
+                        p += num_conv_biases
 
-
-                pdb.set_trace()
+                    num_weights = conv.weight.numel()
+                    conv_weights = torch.from_numpy(weights[p:p + num_weights])
+                    conv.weight.data.copy_(conv_weights.view_as(conv.weight.data))
+                    p += num_weights
 
 
 if __name__ == "__main__":
-    config_path = "yolov3-tiny.cfg"
-    #blocks, net_info = parse_config(config_path)
-    #modules = blocks2modules(blocks, net_info)
-    net = Darknet(config_path)
-    net.load_weights("yolov3-tiny.weights")
-    #x = torch.ones(1, 3, 416, 416)
-    #y = net.forward(x)
+    paths = {
+        "yolov3-tiny": {
+            "config": "models/yolov3-tiny.cfg",
+            "weights": "models/yolov3-tiny.weights"
+        },
+        "yolov3": {
+            "config": "models/yolov3.cfg",
+            "weights": "models/yolov3.weights"
+        }
+    }
+
+    # TODO: debug weights for yolov3
+    #model = "yolov3"
+    model = "yolov3-tiny"
+    net = Darknet(paths[model]["config"])
+    net.load_weights(paths[model]["weights"])
+
+    net_info = net.net_info
+    x = torch.ones(1, 3, net_info["height"], net_info["width"])
+    y = net.forward(x)
