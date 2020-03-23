@@ -222,7 +222,8 @@ def blocks2modules(blocks, net_info):
                 elif block["activation"] == "linear":
                     acti = torch.nn.ReLU(inplace=True)
 
-            curr_out_channels = out_channels + out_channels_list[i + block["from"]]
+            assert out_channels == out_channels_list[i + block["from"]]
+            curr_out_channels = out_channels
 
         elif block["type"] == "upsample":
             # NOTE: torch.nn.Upsample is deprecated in favor of Interpolate;
@@ -282,10 +283,7 @@ class Darknet(torch.nn.Module):
                     dim=1
                 )
             elif block["type"] == "shortcut":
-                x = torch.cat(
-                    (cached_outputs[i - 1], cached_outputs[i + block["from"]]),
-                    dim=1
-                )
+                x = cached_outputs[i-1] + cached_outputs[i+block["from"]]
             elif block["type"] == "yolo":
                 bboxes.append(self.modules_[i](x))
 
@@ -308,7 +306,7 @@ class Darknet(torch.nn.Module):
             # Index (pointer) to position in weights array.
             p = 0
 
-            for block, module in zip(self.blocks, self.modules_):
+            for i, (block, module) in enumerate(zip(self.blocks, self.modules_)):
                 if block["type"] == "convolutional":
                     conv = module[0]
 
@@ -365,15 +363,22 @@ if __name__ == "__main__":
         "yolov3": {
             "config": "models/yolov3.cfg",
             "weights": "models/yolov3.weights"
+        },
+        "yolov3-spp": {
+            "config": "models/yolov3-spp.cfg",
+            "weights": "models/yolov3-spp.weights"
         }
     }
 
-    # TODO: debug weights for yolov3
-    #model = "yolov3"
-    model = "yolov3-tiny"
+    model = "yolov3"
+    #model = "yolov3-tiny"
+    #model = "yolov3-spp"
     net = Darknet(paths[model]["config"])
     net.load_weights(paths[model]["weights"])
+    """
+    height, width = 320, 320
 
     net_info = net.net_info
-    x = torch.ones(1, 3, net_info["height"], net_info["width"])
+    x = torch.ones(1, 3, height, width)
     y = net.forward(x)
+    """
