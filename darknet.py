@@ -39,12 +39,14 @@ class YOLOLayer(torch.nn.Module):
         self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
 
     def forward(self, x):
+        # Introspect number of classes from anchors and input shape.
         num_anchors = len(self.anchors)
         num_samples, num_predictions, h, w = x.shape
         num_classes = int(num_predictions / num_anchors) - 5
         x = x.reshape((num_samples, num_anchors, num_classes + 5, h, w))
 
-        # bbox xywh, objectness, and class energies.
+        # Indices 0-3 corresponds to xywh energies, index 4 corresponds to
+        # objectness energy, and 5: correspond to class energies.
         xywh_energy = x[:, :, 0:4, :, :]
         obj_energy = x[:, :, 4:5, :, :]
         class_energy = x[:, :, 5:, :, :]
@@ -66,14 +68,27 @@ class YOLOLayer(torch.nn.Module):
 
         # Get bbox width and height.
         bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w).div_(w)
-        bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_w).div_(h)
+        bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h).div_(h)
 
+        # Get objectness and class scores.
         obj_score = torch.Tensor(obj_energy).sigmoid()
 
-        class_scores = F.softmax(torch.Tensor(class_energy), dim=2)
+        class_score = F.softmax(torch.Tensor(class_energy), dim=2)
 
-        max_class_score, max_class_idx = torch.max(class_scores, 2, keepdim=True)
+        max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
         max_class_score.mul_(obj_score)
+
+        # Flatten along grid cell dimensions to allow concatenation with
+        # predictions from other scales in Darknet.forward().
+        bbox_xywh = bbox_xywh.reshape(*bbox_xywh.shape[:-2], h * w).squeeze()
+        max_class_score = max_class_score.reshape(
+            *max_class_score.shape[:-2], h * w
+        ).squeeze()
+        max_class_idx = max_class_idx.reshape(
+            *max_class_idx.shape[:-2], h * w
+        ).squeeze()
+
+        return bbox_xywh, max_class_score, max_class_idx
 
 
 def parse_config(fpath):
@@ -273,7 +288,7 @@ class Darknet(torch.nn.Module):
     def forward(self, x):
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
-        bboxes = []
+        bboxes, max_class_scores, max_class_idxs = [], [], []
         for i, block in enumerate(self.blocks):
             if block["type"] in ("convolutional", "maxpool", "upsample"):
                 x = self.modules_[i](x)
@@ -285,13 +300,19 @@ class Darknet(torch.nn.Module):
             elif block["type"] == "shortcut":
                 x = cached_outputs[i-1] + cached_outputs[i+block["from"]]
             elif block["type"] == "yolo":
-                bboxes.append(self.modules_[i](x))
+                bbox_xywh, max_class_score, max_class_idx = self.modules_[i](x)
+                bboxes.append(bbox_xywh)
+                max_class_scores.append(max_class_score)
+                max_class_idxs.append(max_class_idx)
 
             if i in cached_outputs:
                 cached_outputs[i] = x
 
             #print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
-        return x
+        # Concatenate predictions from each scale.
+        # TODO
+        pdb.set_trace()
+        return None
 
     def load_weights(self, weights_path):
         """
@@ -375,10 +396,11 @@ if __name__ == "__main__":
     #model = "yolov3-spp"
     net = Darknet(paths[model]["config"])
     net.load_weights(paths[model]["weights"])
-    """
-    height, width = 320, 320
-
     net_info = net.net_info
-    x = torch.ones(1, 3, height, width)
-    y = net.forward(x)
-    """
+
+    #shapes = (320, 416, 608)
+    shapes = (320,)
+    for shape in shapes:
+        height, width = shape, shape
+        x = torch.ones(1, 3, height, width)
+        y = net.forward(x)
