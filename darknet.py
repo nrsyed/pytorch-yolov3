@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+# TODO: support YOLOv3-spp
+
 
 class EmptyLayer(torch.nn.Module):
     def __init__(self):
@@ -67,8 +69,6 @@ class YOLOLayer(torch.nn.Module):
         anchor_h = torch.Tensor(anchors)[:, 1].reshape(1, num_anchors, 1, 1)
 
         # Get bbox width and height.
-        #bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w).div_(w)
-        #bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h).div_(h)
         bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w)
         bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h)
 
@@ -321,6 +321,7 @@ class Darknet(torch.nn.Module):
         # Scale bbox w and h based on training width/height from net info.
         train_wh = torch.Tensor([self.net_info["width"], self.net_info["height"]])
         bbox_xywhs[:, 2:4].div_(train_wh)
+
         return {
             "bbox_xywhs": bbox_xywhs,
             "max_class_idx": max_class_idx,
