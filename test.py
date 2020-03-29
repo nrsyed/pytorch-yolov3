@@ -12,12 +12,6 @@ def img_to_tensor(img):
 
 
 def draw_boxes(img, bboxes, cls_idx=None, classes=None):
-    rows, cols = img.shape[:2]
-
-    bboxes[:, [0, 2]] *= cols
-    bboxes[:, [1, 3]] *= rows
-    bboxes = bboxes.astype(np.int)
-
     for i, bbox in enumerate(bboxes):
         center_x, center_y, w, h = bbox
         tl_x = center_x - int(w / 2)
@@ -33,6 +27,40 @@ def draw_boxes(img, bboxes, cls_idx=None, classes=None):
                 img, str(cls_idx[i]), (tl_x, tl_y - 4), cv2.FONT_HERSHEY_SIMPLEX,
                 0.5, (0, 255, 0), thickness=2
             )
+
+
+def _non_max_suppression(bboxes, prob):
+    """
+    Perform non-maximum suppression on an array of bboxes and
+    return the indices of detections to retain.
+
+    Args:
+        bboxes (np.array): An Mx5 array of bboxes (consisting of M
+            detections/bboxes), where bboxes[:, :4] represent the four
+            bbox coordinates.
+
+        prob (np.array): An array of M elements corresponding to the
+            max class probability of each detection/bbox.
+    """
+    pass
+
+
+def cxywh_to_tlbr(bboxes):
+    """
+    Args:
+        bboxes (np.array): An MxN array of detections where bboxes[:, :4]
+            correspond to coordinates (center x, center y, width, height).
+
+    Returns:
+        An MxN array of detections where bboxes[:, :4] correspond to
+        coordinates (top left x, top left y, bottom right x, bottom right y).
+    """
+
+    tlbr = np.copy(bboxes)
+    tlbr[:, :2] = bboxes[:, :2] - (bboxes[:, 2:4] // 2)
+    tlbr[:, 2:4] = bboxes[:, :2] + (bboxes[:, 2:4] // 2)
+    return tlbr
+
 
 if __name__ == "__main__":
     paths = {
@@ -50,7 +78,7 @@ if __name__ == "__main__":
         }
     }
 
-    #model = "yolov3"
+    model = "yolov3"
     #model = "yolov3-tiny"
     #model = "yolov3-spp"
     net = Darknet(paths[model]["config"])
@@ -70,11 +98,22 @@ if __name__ == "__main__":
     bboxes = out["bbox_xywhs"].detach().numpy()
     cls_idx = out["max_class_idx"].numpy()
 
-    conf_thresh = 0.05
-    mask = bboxes[:, 4] >= conf_thresh
+    prob = bboxes[:, 4]
+    bboxes = bboxes[:, :4]
+
+    prob_thresh = 0.05
+    mask = prob >= prob_thresh
+
     bboxes = bboxes[mask, :]
     cls_idx = cls_idx[mask]
+    prob = prob[mask]
 
-    draw_boxes(img, bboxes[:, :4], cls_idx=cls_idx, classes=None)
-    cv2.imshow("img", img)
-    cv2.waitKey(0)
+    rows, cols = img.shape[:2]
+    bboxes[:, [0, 2]] *= cols
+    bboxes[:, [1, 3]] *= rows
+    bboxes = bboxes.astype(np.int)
+
+    bboxes = cxywh_to_tlbr(bboxes)
+    #draw_boxes(img, bboxes[:, :4], cls_idx=cls_idx, classes=None)
+    #cv2.imshow("img", img)
+    #cv2.waitKey(0)
