@@ -180,13 +180,13 @@ if __name__ == "__main__":
     args = vars(parser.parse_args())
 
     for path_arg in ("config_path", "weights_path", "image_path"):
-        args[path_arg] = args[path_arg].expanduser().absolute()
+        args[path_arg] = str(args[path_arg].expanduser().absolute())
 
     net = Darknet(args["config_path"]).load_weights(args["weights_path"])
     net.eval()
     net_info = net.net_info
 
-    img = cv2.imread(img_path)
+    img = cv2.imread(args["image_path"])
     resized = cv2.resize(img, (net_info["height"], net_info["width"]))
 
     inp = img_to_tensor(resized)

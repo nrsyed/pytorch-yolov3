@@ -5,8 +5,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-# TODO: support YOLOv3-spp
-
 
 class DummyLayer(torch.nn.Module):
     def __init__(self):
@@ -19,9 +17,9 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
     https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
     """
     def forward(self, input_):
-        # TODO: generalize for other kernel sizes and strides.
-        if self.kernel_size == 2 and self.stride == 1:
-            zero_pad = torch.nn.ZeroPad2d((0, 1, 0, 1))
+        if self.kernel_size > 1 and self.stride == 1:
+            padding = self.kernel_size - 1
+            zero_pad = torch.nn.ZeroPad2d((0, padding, 0, padding))
             input_ = zero_pad(input_)
         return F.max_pool2d(
             input_, self.kernel_size, self.stride, self.padding,
@@ -319,6 +317,7 @@ class Darknet(torch.nn.Module):
             "bbox_xywhs": bbox_xywhs,
             "max_class_idx": max_class_idx,
         }
+
 
     def load_weights(self, weights_path):
         """
