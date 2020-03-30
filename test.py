@@ -1,6 +1,8 @@
+import argparse
 from collections import deque
 import colorsys
 import os
+import pathlib
 import pdb
 
 import cv2
@@ -159,37 +161,36 @@ def cxywh_to_tlbr(bboxes):
 
 
 if __name__ == "__main__":
-    paths = {
-        "yolov3-tiny": {
-            "config": "models/yolov3-tiny.cfg",
-            "weights": "models/yolov3-tiny.weights"
-        },
-        "yolov3": {
-            "config": "models/yolov3.cfg",
-            "weights": "models/yolov3.weights"
-        },
-        "yolov3-spp": {
-            "config": "models/yolov3-spp.cfg",
-            "weights": "models/yolov3-spp.weights"
-        }
-    }
+    parser = argparse.ArgumentParser()
+    path_args = parser.add_argument_group()
+    parser.add_argument(
+        "--config-path", "-c", type=pathlib.Path,
+        default=pathlib.Path("models/yolov3.cfg"),
+        help="Path to Darknet model config file"
+    )
+    parser.add_argument(
+        "--weights-path", "-w", type=pathlib.Path,
+        default=pathlib.Path("models/yolov3.weights"),
+        help="Path to Darknet model weights file"
+    )
+    parser.add_argument(
+        "--image-path", "-i", type=pathlib.Path, required=True,
+        help="Path to image file"
+    )
+    args = vars(parser.parse_args())
 
-    model = "yolov3"
-    #model = "yolov3-tiny"
-    #model = "yolov3-spp"
-    net = Darknet(paths[model]["config"])
-    net.load_weights(paths[model]["weights"])
+    for path_arg in ("config_path", "weights_path", "image_path"):
+        args[path_arg] = args[path_arg].expanduser().absolute()
+
+    net = Darknet(args["config_path"]).load_weights(args["weights_path"])
     net.eval()
     net_info = net.net_info
 
-    img_path = "images/dog-cycle-car.png"
     img = cv2.imread(img_path)
     resized = cv2.resize(img, (net_info["height"], net_info["width"]))
 
     inp = img_to_tensor(resized)
     out = net.forward(inp)
-    #cv2.imshow("img", img)
-    #cv2.waitKey(0)
 
     bboxes = out["bbox_xywhs"].detach().numpy()
     cls_idx = out["max_class_idx"].numpy()

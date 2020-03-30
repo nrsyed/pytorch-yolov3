@@ -8,7 +8,7 @@ import torch.nn.functional as F
 # TODO: support YOLOv3-spp
 
 
-class EmptyLayer(torch.nn.Module):
+class DummyLayer(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -19,6 +19,7 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
     https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
     """
     def forward(self, input_):
+        # TODO: generalize for other kernel sizes and strides.
         if self.kernel_size == 2 and self.stride == 1:
             zero_pad = torch.nn.ZeroPad2d((0, 1, 0, 1))
             input_ = zero_pad(input_)
@@ -29,12 +30,6 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    """
-    NOTE: the number of object classes can be deduced from the anchors and
-    anchor mask and does not need to be explicitly provided or stored as part
-    of this class.
-    """
-
     def __init__(self, anchors, mask):
         super().__init__()
         self.mask = mask
@@ -224,7 +219,7 @@ def blocks2modules(blocks, net_info):
             module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
-            module.add_module("route_{}".format(i), EmptyLayer())
+            module.add_module("route_{}".format(i), DummyLayer())
 
             out_channels = sum(
                 out_channels_list[layer_idx] for layer_idx in block["layers"]
@@ -233,7 +228,7 @@ def blocks2modules(blocks, net_info):
             curr_out_channels = out_channels
 
         elif block["type"] == "shortcut":
-            module.add_module("shortcut_{}".format(i), EmptyLayer())
+            module.add_module("shortcut_{}".format(i), DummyLayer())
 
             if "activation" in block:
                 if block["activation"] == "leaky":
@@ -312,8 +307,6 @@ class Darknet(torch.nn.Module):
             if i in cached_outputs:
                 cached_outputs[i] = x
 
-            #print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
-
         # Concatenate predictions from each scale.
         bbox_xywhs = torch.cat(bbox_list, dim=0)
         max_class_idx = torch.cat(max_class_idx_list)
@@ -386,3 +379,4 @@ class Darknet(torch.nn.Module):
                     conv_weights = torch.from_numpy(weights[p:p + num_weights])
                     conv.weight.data.copy_(conv_weights.view_as(conv.weight.data))
                     p += num_weights
+        return self
