@@ -4,6 +4,7 @@ import colorsys
 import os
 import pathlib
 import pdb
+import time
 
 import cv2
 import numpy as np
@@ -11,6 +12,16 @@ import torch
 from darknet import Darknet
 
 # TODO: consistent variable naming (plural/singular)
+
+
+import functools
+def profile(func):
+    def decorated(*args, **kwargs):
+        start_t = time.time()
+        retval = func(*args, **kwargs)
+        print(f"{func.__name__}: {time.time() - start_t:.4f}")
+        return retval
+    return decorated
 
 
 def img_to_tensor(img):
@@ -165,7 +176,9 @@ def do_inference(net, image, prob_thresh=0.12, nms_iou_thresh=0.3, resize=True):
         image = cv2.resize(image, (net_info["height"], net_info["width"]))
 
     # CUDA
-    inp = img_to_tensor(image).cuda()
+    image = np.transpose(np.flip(image, 2), (2, 0, 1)).astype(np.float32) / 255.
+    inp = torch.tensor(image, device="cuda").unsqueeze(0)
+
     out = net.forward(inp)
 
     bboxes = out["bbox_xywhs"].detach().cpu().numpy()
@@ -257,5 +270,6 @@ if __name__ == "__main__":
             cv2.imshow("YOLO", frame)
             if cv2.waitKey(1) == ord("q"):
                 break
+
         cap.release()
         cv2.destroyAllWindows()
