@@ -31,12 +31,10 @@ def unique_colors(num_colors):
 
 
 def draw_boxes(img, bboxes, prob=None, cls_idx=None, class_names=None):
-    if cls_idx is not None:
-        unique_cls_idxs = set(cls_idx)
+    if class_names is not None:
         colors = dict()
-        num_colors = len(unique_cls_idxs)
-        for idx, color in zip(unique_cls_idxs, unique_colors(num_colors)):
-            colors[idx] = color
+        num_colors = len(class_names)
+        colors = list(unique_colors(num_colors))
 
     for i, bbox in enumerate(bboxes):
         bbox_str = []
@@ -160,7 +158,7 @@ def cxywh_to_tlbr(bboxes):
     return tlbr
 
 
-def do_inference(net, image, prob_thresh=0.05, nms_iou_thresh=0.3, resize=True):
+def do_inference(net, image, prob_thresh=0.15, nms_iou_thresh=0.3, resize=True):
     orig_rows, orig_cols = image.shape[:2]
     net_info = net.net_info
     if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
@@ -196,7 +194,7 @@ def do_inference(net, image, prob_thresh=0.05, nms_iou_thresh=0.3, resize=True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--class-list", "-C", type=pathlib.Path, default=None,
+        "--class-list", "-l", type=pathlib.Path, default=None,
         help="Path to text file of class names"
     )
     parser.add_argument(
@@ -209,13 +207,22 @@ if __name__ == "__main__":
         default=pathlib.Path("models/yolov3.weights"),
         help="Path to Darknet model weights file"
     )
-    parser.add_argument(
-        "--image-path", "-i", type=pathlib.Path, required=True,
-        help="Path to image file"
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--image-path", "-i", type=pathlib.Path, help="Path to image file"
+    )
+    source.add_argument(
+        "--video-path", "-v", type=pathlib.Path, help="Path to video file"
+    )
+    source.add_argument(
+        "--camera", "-C", type=int, help="Camera or video capture device ID"
     )
     args = vars(parser.parse_args())
 
-    for path_arg in ("class_list", "config_path", "weights_path", "image_path"):
+    path_args = (
+        "class_list", "config_path", "weights_path", "image_path", "video_path"
+    )
+    for path_arg in path_args:
         if args[path_arg] is not None:
             args[path_arg] = str(args[path_arg].expanduser().absolute())
 
@@ -227,8 +234,25 @@ if __name__ == "__main__":
         with open(args["class_list"], "r") as f:
             class_names = [line.strip() for line in f.readlines()]
 
-    image = cv2.imread(args["image_path"])
-    bboxes, cls_idx = do_inference(net, image)
-    draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
-    cv2.imshow("img", image)
-    cv2.waitKey(0)
+    if args["image_path"]:
+        image = cv2.imread(args["image_path"])
+        bboxes, cls_idx = do_inference(net, image)
+        draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
+        cv2.imshow("img", image)
+        cv2.waitKey(0)
+    elif args["camera"] is not None:
+        cap = cv2.VideoCapture(args["camera"])
+        assert cap.isOpened(), "Error opening video capture device"
+        grabbed, frame = cap.read()
+
+        while True:
+            grabbed, frame = cap.read()
+            if not grabbed:
+                break
+            bboxes, cls_idx = do_inference(net, frame)
+            draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
+            cv2.imshow("YOLO", frame)
+            if cv2.waitKey(1) == ord("q"):
+                break
+        cap.release()
+        cv2.destroyAllWindows()
