@@ -4,6 +4,7 @@ import colorsys
 import os
 import pathlib
 import pdb
+import threading
 
 import cv2
 import numpy as np
@@ -11,6 +12,47 @@ import torch
 from darknet import Darknet
 
 # TODO: consistent variable naming (plural/singular)
+
+
+class VideoGetter():
+    def __init__(self, src=0):
+        self.cap = cv2.VideoCapture(src)
+        self.grabbed, self.frame = self.cap.read()
+        self.stopped = False
+
+    def start(self):
+        threading.Thread(target=self.get, args=()).start()
+        return self
+
+    def get(self):
+        while not self.stopped:
+            if not self.grabbed:
+                self.stop()
+            else:
+                self.grabbed, self.frame = self.cap.read()
+
+    def stop(self):
+        self.stopped = True
+
+
+class VideoShower():
+    def __init__(self, frame=None):
+        self.frame = frame
+        self.stopped = False
+
+    def start(self):
+        threading.Thread(target=self.show, args=()).start()
+        return self
+
+    def show(self):
+        while not self.stopped:
+            cv2.imshow("Video", self.frame)
+            if cv2.waitKey(1) == ord("q"):
+                self.stopped = True
+
+    def stop(self):
+        cv2.destroyAllWindows()
+        self.stopped = True
 
 
 def img_to_tensor(img):
@@ -241,18 +283,16 @@ if __name__ == "__main__":
         cv2.imshow("img", image)
         cv2.waitKey(0)
     elif args["camera"] is not None:
-        cap = cv2.VideoCapture(args["camera"])
-        assert cap.isOpened(), "Error opening video capture device"
-        grabbed, frame = cap.read()
+        video_getter = VideoGetter(args["camera"]).start()
+        video_shower = VideoShower(video_getter.frame).start()
 
         while True:
-            grabbed, frame = cap.read()
-            if not grabbed:
+            if video_getter.stopped or video_shower.stopped:
+                video_shower.stop()
+                video_getter.stop()
                 break
+
+            frame = video_getter.frame
             bboxes, cls_idx = do_inference(net, frame)
             draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
-            cv2.imshow("YOLO", frame)
-            if cv2.waitKey(1) == ord("q"):
-                break
-        cap.release()
-        cv2.destroyAllWindows()
+            video_shower.frame = frame
