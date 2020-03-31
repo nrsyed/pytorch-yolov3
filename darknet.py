@@ -46,7 +46,7 @@ class YOLOLayer(torch.nn.Module):
         obj_energy = x[:, :, 4:5, :, :]
         class_energy = x[:, :, 5:, :, :]
 
-        bbox_xywh = torch.cuda.FloatTensor(xywh_energy)
+        bbox_xywh = torch.tensor(xywh_energy, device="cuda")
 
         # Cell offsets C_x and C_y.
         cx = torch.linspace(0, w - 1, w, device="cuda").repeat(h, 1)
@@ -58,17 +58,17 @@ class YOLOLayer(torch.nn.Module):
 
         # Anchor priors P_w and P_h.
         anchors = self.anchors
-        anchor_w = torch.cuda.FloatTensor(anchors)[:, 0].reshape(1, num_anchors, 1, 1)
-        anchor_h = torch.cuda.FloatTensor(anchors)[:, 1].reshape(1, num_anchors, 1, 1)
+        anchor_w = torch.tensor(anchors, device="cuda")[:, 0].reshape(1, num_anchors, 1, 1)
+        anchor_h = torch.tensor(anchors, device="cuda")[:, 1].reshape(1, num_anchors, 1, 1)
 
         # Get bbox width and height.
         bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w)
         bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h)
 
         # Get objectness and class scores.
-        obj_score = torch.cuda.FloatTensor(obj_energy).sigmoid()
+        obj_score = torch.tensor(obj_energy, device="cuda").sigmoid()
 
-        class_score = F.softmax(torch.cuda.FloatTensor(class_energy), dim=2)
+        class_score = F.softmax(torch.tensor(class_energy, device="cuda"), dim=2)
 
         max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
         max_class_score.mul_(obj_score)
@@ -310,7 +310,9 @@ class Darknet(torch.nn.Module):
         max_class_idx = torch.cat(max_class_idx_list)
 
         # Scale bbox w and h based on training width/height from net info.
-        train_wh = torch.cuda.FloatTensor([self.net_info["width"], self.net_info["height"]])
+        train_wh = torch.tensor(
+            [self.net_info["width"], self.net_info["height"]], device="cuda"
+        )
         bbox_xywhs[:, 2:4].div_(train_wh)
 
         return {
