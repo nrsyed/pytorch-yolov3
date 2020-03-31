@@ -158,16 +158,18 @@ def cxywh_to_tlbr(bboxes):
     return tlbr
 
 
-def do_inference(net, image, prob_thresh=0.15, nms_iou_thresh=0.3, resize=True):
+def do_inference(net, image, prob_thresh=0.12, nms_iou_thresh=0.3, resize=True):
     orig_rows, orig_cols = image.shape[:2]
     net_info = net.net_info
     if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
         image = cv2.resize(image, (net_info["height"], net_info["width"]))
-    inp = img_to_tensor(image)
+
+    # CUDA
+    inp = img_to_tensor(image).cuda()
     out = net.forward(inp)
 
-    bboxes = out["bbox_xywhs"].detach().numpy()
-    cls_idx = out["max_class_idx"].numpy()
+    bboxes = out["bbox_xywhs"].detach().cpu().numpy()
+    cls_idx = out["max_class_idx"].cpu().numpy()
 
     prob = bboxes[:, 4]
     bboxes = bboxes[:, :4]
@@ -228,6 +230,7 @@ if __name__ == "__main__":
 
     net = Darknet(args["config_path"]).load_weights(args["weights_path"])
     net.eval()
+    net.cuda()
 
     class_names = None
     if args["class_list"] is not None and os.path.isfile(args["class_list"]):
