@@ -160,9 +160,45 @@ def cxywh_to_tlbr(bboxes):
     return tlbr
 
 
+def do_inference(net, image, prob_thresh=0.05, nms_iou_thresh=0.3, resize=True):
+    orig_rows, orig_cols = image.shape[:2]
+    net_info = net.net_info
+    if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
+        image = cv2.resize(image, (net_info["height"], net_info["width"]))
+    inp = img_to_tensor(image)
+    out = net.forward(inp)
+
+    bboxes = out["bbox_xywhs"].detach().numpy()
+    cls_idx = out["max_class_idx"].numpy()
+
+    prob = bboxes[:, 4]
+    bboxes = bboxes[:, :4]
+
+    mask = prob >= prob_thresh
+
+    bboxes = bboxes[mask, :]
+    cls_idx = cls_idx[mask]
+    prob = prob[mask]
+
+    bboxes[:, [0, 2]] *= orig_cols
+    bboxes[:, [1, 3]] *= orig_rows
+    bboxes = bboxes.astype(np.int)
+
+    bboxes = cxywh_to_tlbr(bboxes)
+    idxs_to_keep = non_max_suppression(
+        bboxes, prob, cls_idx=cls_idx, iou_thresh=nms_iou_thresh
+    )
+    bboxes = bboxes[idxs_to_keep, :]
+    cls_idx = cls_idx[idxs_to_keep]
+    return bboxes, cls_idx
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    path_args = parser.add_argument_group()
+    parser.add_argument(
+        "--class-list", "-C", type=pathlib.Path, default=None,
+        help="Path to text file of class names"
+    )
     parser.add_argument(
         "--config-path", "-c", type=pathlib.Path,
         default=pathlib.Path("models/yolov3.cfg"),
@@ -179,49 +215,20 @@ if __name__ == "__main__":
     )
     args = vars(parser.parse_args())
 
-    for path_arg in ("config_path", "weights_path", "image_path"):
-        args[path_arg] = str(args[path_arg].expanduser().absolute())
+    for path_arg in ("class_list", "config_path", "weights_path", "image_path"):
+        if args[path_arg] is not None:
+            args[path_arg] = str(args[path_arg].expanduser().absolute())
 
     net = Darknet(args["config_path"]).load_weights(args["weights_path"])
     net.eval()
-    net_info = net.net_info
-
-    img = cv2.imread(args["image_path"])
-    resized = cv2.resize(img, (net_info["height"], net_info["width"]))
-
-    inp = img_to_tensor(resized)
-    out = net.forward(inp)
-
-    bboxes = out["bbox_xywhs"].detach().numpy()
-    cls_idx = out["max_class_idx"].numpy()
-
-    prob = bboxes[:, 4]
-    bboxes = bboxes[:, :4]
-
-    prob_thresh = 0.05
-    mask = prob >= prob_thresh
-
-    bboxes = bboxes[mask, :]
-    cls_idx = cls_idx[mask]
-    prob = prob[mask]
-
-    rows, cols = img.shape[:2]
-    bboxes[:, [0, 2]] *= cols
-    bboxes[:, [1, 3]] *= rows
-    bboxes = bboxes.astype(np.int)
-
-    bboxes = cxywh_to_tlbr(bboxes)
-    #idxs_to_keep = _non_max_suppression(bboxes, prob)
-    idxs_to_keep = non_max_suppression(bboxes, prob, cls_idx=cls_idx)
-    bboxes = bboxes[idxs_to_keep, :]
-    cls_idx = cls_idx[idxs_to_keep]
 
     class_names = None
-    class_names_fpath = "models/coco.names"
-    if os.path.isfile(class_names_fpath):
-        with open(class_names_fpath, "r") as f:
+    if args["class_list"] is not None and os.path.isfile(args["class_list"]):
+        with open(args["class_list"], "r") as f:
             class_names = [line.strip() for line in f.readlines()]
 
-    draw_boxes(img, bboxes, cls_idx=cls_idx, class_names=class_names)
-    cv2.imshow("img", img)
+    image = cv2.imread(args["image_path"])
+    bboxes, cls_idx = do_inference(net, image)
+    draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
+    cv2.imshow("img", image)
     cv2.waitKey(0)
