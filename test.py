@@ -169,15 +169,16 @@ def cxywh_to_tlbr(bboxes):
     return tlbr
 
 
-def do_inference(net, image, prob_thresh=0.12, nms_iou_thresh=0.3, resize=True):
+def do_inference(
+    net, image, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
+):
     orig_rows, orig_cols = image.shape[:2]
     net_info = net.net_info
     if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
         image = cv2.resize(image, (net_info["height"], net_info["width"]))
 
-    # CUDA
     image = np.transpose(np.flip(image, 2), (2, 0, 1)).astype(np.float32) / 255.
-    inp = torch.tensor(image, device="cuda").unsqueeze(0)
+    inp = torch.tensor(image, device=device).unsqueeze(0)
 
     out = net.forward(inp)
 
@@ -222,6 +223,8 @@ if __name__ == "__main__":
         default=pathlib.Path("models/yolov3.weights"),
         help="Path to Darknet model weights file"
     )
+    parser.add_argument("--device", "-d", default="cuda")
+
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--image-path", "-i", type=pathlib.Path, help="Path to image file"
@@ -241,9 +244,16 @@ if __name__ == "__main__":
         if args[path_arg] is not None:
             args[path_arg] = str(args[path_arg].expanduser().absolute())
 
-    net = Darknet(args["config_path"]).load_weights(args["weights_path"])
+    device = args["device"]
+    if device.startswith("cuda"):
+        if torch.cuda.is_available():
+            net.cuda()
+        else:
+            device = "cpu"
+
+    net = Darknet(args["config_path"], device=device)
+    net.load_weights(args["weights_path"])
     net.eval()
-    net.cuda()
 
     class_names = None
     if args["class_list"] is not None and os.path.isfile(args["class_list"]):
@@ -252,7 +262,7 @@ if __name__ == "__main__":
 
     if args["image_path"]:
         image = cv2.imread(args["image_path"])
-        bboxes, cls_idx = do_inference(net, image)
+        bboxes, cls_idx = do_inference(net, image, device=device)
         draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
         cv2.imshow("img", image)
         cv2.waitKey(0)
@@ -265,7 +275,7 @@ if __name__ == "__main__":
             grabbed, frame = cap.read()
             if not grabbed:
                 break
-            bboxes, cls_idx = do_inference(net, frame)
+            bboxes, cls_idx = do_inference(net, frame, device=device)
             draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
             cv2.imshow("YOLO", frame)
             if cv2.waitKey(1) == ord("q"):
