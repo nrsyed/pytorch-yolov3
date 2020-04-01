@@ -28,10 +28,11 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    def __init__(self, anchors, mask):
+    def __init__(self, anchors, mask, device="cuda"):
         super().__init__()
-        self.mask = mask
         self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
+        self.mask = mask
+        self.device = device
 
     def forward(self, x_):
         # Introspect number of classes from anchors and input shape.
@@ -46,11 +47,13 @@ class YOLOLayer(torch.nn.Module):
         obj_energy = x[:, :, 4:5, :, :]
         class_energy = x[:, :, 5:, :, :]
 
-        bbox_xywh = torch.Tensor(xywh_energy)
+        bbox_xywh = torch.tensor(xywh_energy, device=self.device)
 
         # Cell offsets C_x and C_y.
-        cx = torch.linspace(0, w - 1, w).repeat(h, 1)
-        cy = torch.linspace(0, h - 1, h).repeat(w, 1).t().contiguous()
+        cx = torch.linspace(0, w - 1, w, device=self.device).repeat(h, 1)
+        cy = torch.linspace(
+            0, h - 1, h, device=self.device
+        ).repeat(w, 1).t().contiguous()
 
         # Get bbox center x and y coordinates.
         bbox_xywh[:, :, 0, :, :].sigmoid_().add_(cx).div_(w)
@@ -58,17 +61,23 @@ class YOLOLayer(torch.nn.Module):
 
         # Anchor priors P_w and P_h.
         anchors = self.anchors
-        anchor_w = torch.Tensor(anchors)[:, 0].reshape(1, num_anchors, 1, 1)
-        anchor_h = torch.Tensor(anchors)[:, 1].reshape(1, num_anchors, 1, 1)
+        anchor_w = torch.tensor(
+            anchors, device=self.device
+        )[:, 0].reshape(1, num_anchors, 1, 1)
+        anchor_h = torch.tensor(
+            anchors, device=self.device
+        )[:, 1].reshape(1, num_anchors, 1, 1)
 
         # Get bbox width and height.
         bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w)
         bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h)
 
         # Get objectness and class scores.
-        obj_score = torch.Tensor(obj_energy).sigmoid()
+        obj_score = torch.tensor(obj_energy, device=self.device).sigmoid()
 
-        class_score = F.softmax(torch.Tensor(class_energy), dim=2)
+        class_score = F.softmax(
+            torch.tensor(class_energy, device=self.device), dim=2
+        )
 
         max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
         max_class_score.mul_(obj_score)
@@ -258,10 +267,11 @@ def blocks2modules(blocks, net_info):
 
 
 class Darknet(torch.nn.Module):
-    def __init__(self, config_fpath):
+    def __init__(self, config_fpath, device="cuda"):
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
         self.modules_ = blocks2modules(self.blocks, self.net_info)
+        self.device = device
 
         # Determine the indices of the layers that will have to be cached
         # for route and shortcut connections.
@@ -310,7 +320,10 @@ class Darknet(torch.nn.Module):
         max_class_idx = torch.cat(max_class_idx_list)
 
         # Scale bbox w and h based on training width/height from net info.
-        train_wh = torch.Tensor([self.net_info["width"], self.net_info["height"]])
+        train_wh = torch.tensor(
+            [self.net_info["width"], self.net_info["height"]],
+            device=self.device
+        )
         bbox_xywhs[:, 2:4].div_(train_wh)
 
         return {

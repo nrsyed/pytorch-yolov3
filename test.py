@@ -4,6 +4,7 @@ import colorsys
 import os
 import pathlib
 import pdb
+import time
 
 import cv2
 import numpy as np
@@ -11,6 +12,16 @@ import torch
 from darknet import Darknet
 
 # TODO: consistent variable naming (plural/singular)
+
+
+import functools
+def profile(func):
+    def decorated(*args, **kwargs):
+        start_t = time.time()
+        retval = func(*args, **kwargs)
+        print(f"{func.__name__}: {time.time() - start_t:.4f}")
+        return retval
+    return decorated
 
 
 def img_to_tensor(img):
@@ -158,16 +169,21 @@ def cxywh_to_tlbr(bboxes):
     return tlbr
 
 
-def do_inference(net, image, prob_thresh=0.15, nms_iou_thresh=0.3, resize=True):
+def do_inference(
+    net, image, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
+):
     orig_rows, orig_cols = image.shape[:2]
     net_info = net.net_info
     if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
         image = cv2.resize(image, (net_info["height"], net_info["width"]))
-    inp = img_to_tensor(image)
+
+    image = np.transpose(np.flip(image, 2), (2, 0, 1)).astype(np.float32) / 255.
+    inp = torch.tensor(image, device=device).unsqueeze(0)
+
     out = net.forward(inp)
 
-    bboxes = out["bbox_xywhs"].detach().numpy()
-    cls_idx = out["max_class_idx"].numpy()
+    bboxes = out["bbox_xywhs"].detach().cpu().numpy()
+    cls_idx = out["max_class_idx"].cpu().numpy()
 
     prob = bboxes[:, 4]
     bboxes = bboxes[:, :4]
@@ -207,6 +223,8 @@ if __name__ == "__main__":
         default=pathlib.Path("models/yolov3.weights"),
         help="Path to Darknet model weights file"
     )
+    parser.add_argument("--device", "-d", default="cuda")
+
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--image-path", "-i", type=pathlib.Path, help="Path to image file"
@@ -226,7 +244,15 @@ if __name__ == "__main__":
         if args[path_arg] is not None:
             args[path_arg] = str(args[path_arg].expanduser().absolute())
 
-    net = Darknet(args["config_path"]).load_weights(args["weights_path"])
+    device = args["device"]
+    if device.startswith("cuda"):
+        if torch.cuda.is_available():
+            net.cuda()
+        else:
+            device = "cpu"
+
+    net = Darknet(args["config_path"], device=device)
+    net.load_weights(args["weights_path"])
     net.eval()
 
     class_names = None
@@ -236,7 +262,7 @@ if __name__ == "__main__":
 
     if args["image_path"]:
         image = cv2.imread(args["image_path"])
-        bboxes, cls_idx = do_inference(net, image)
+        bboxes, cls_idx = do_inference(net, image, device=device)
         draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
         cv2.imshow("img", image)
         cv2.waitKey(0)
@@ -249,10 +275,11 @@ if __name__ == "__main__":
             grabbed, frame = cap.read()
             if not grabbed:
                 break
-            bboxes, cls_idx = do_inference(net, frame)
+            bboxes, cls_idx = do_inference(net, frame, device=device)
             draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
             cv2.imshow("YOLO", frame)
             if cv2.waitKey(1) == ord("q"):
                 break
+
         cap.release()
         cv2.destroyAllWindows()
