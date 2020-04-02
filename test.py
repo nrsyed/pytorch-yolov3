@@ -314,14 +314,37 @@ if __name__ == "__main__":
         cv2.imshow("img", image)
         cv2.waitKey(0)
     elif args["camera"] is not None:
+        num_samples = 50
+        fps = deque(maxlen=num_samples)
+
         if args["threading"] == "get":
-            #video_getter = VideoGetter(args["camera"]).start()
-            pass
+            video_getter = VideoGetter(args["camera"]).start()
+
+            while True:
+                start_t = time.time()
+                if video_getter.stopped:
+                    break
+                frame = video_getter.frame
+                bboxes, cls_idx = do_inference(net, frame, device=device)
+                draw_boxes(
+                    frame, bboxes, cls_idx=cls_idx, class_names=class_names
+                )
+
+                fps.append(int(1 / (time.time() - start_t)))
+                cv2.putText(
+                    frame,  f"{int(sum(fps) / num_samples)} fps",
+                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
+                )
+                cv2.imshow("YOLO", frame)
+                if cv2.waitKey(1) == ord("q"):
+                    video_getter.stop()
+                    break
         elif args["threading"] == "show":
             cap = cv2.VideoCapture(args["camera"])
             grabbed, frame = cap.read()
             video_shower = VideoShower(frame, win_name="YOLO").start()
             while True:
+                start_t = time.time()
                 grabbed, frame = cap.read()
                 if not grabbed or video_shower.stopped:
                     break
@@ -329,13 +352,22 @@ if __name__ == "__main__":
                 draw_boxes(
                     frame, bboxes, cls_idx=cls_idx, class_names=class_names
                 )
+
+                fps.append(int(1 / (time.time() - start_t)))
+                cv2.putText(
+                    frame,  f"{int(sum(fps) / num_samples)} fps",
+                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
+                )
                 video_shower.frame = frame
+            cap.release()
         elif args["threading"] == "both":
             pass
         else:
             cap = cv2.VideoCapture(args["camera"])
             grabbed, frame = cap.read()
+
             while True:
+                start_t = time.time()
                 grabbed, frame = cap.read()
                 if not grabbed:
                     break
@@ -343,9 +375,15 @@ if __name__ == "__main__":
                 draw_boxes(
                     frame, bboxes, cls_idx=cls_idx, class_names=class_names
                 )
+
+                fps.append(int(1 / (time.time() - start_t)))
+                cv2.putText(
+                    frame,  f"{int(sum(fps) / num_samples)} fps",
+                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
+                )
                 cv2.imshow("YOLO", frame)
                 if cv2.waitKey(1) == ord("q"):
                     break
+            cap.release()
 
-        cap.release()
         cv2.destroyAllWindows()
