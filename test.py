@@ -335,14 +335,14 @@ if __name__ == "__main__":
                     frame,  f"{int(sum(fps) / num_samples)} fps",
                     (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
                 )
-                cv2.imshow("YOLO", frame)
+                cv2.imshow("YOLOv3", frame)
                 if cv2.waitKey(1) == ord("q"):
                     video_getter.stop()
                     break
         elif args["threading"] == "show":
             cap = cv2.VideoCapture(args["camera"])
             grabbed, frame = cap.read()
-            video_shower = VideoShower(frame, win_name="YOLO").start()
+            video_shower = VideoShower(frame, win_name="YOLOv3").start()
             while True:
                 start_t = time.time()
                 grabbed, frame = cap.read()
@@ -361,7 +361,27 @@ if __name__ == "__main__":
                 video_shower.frame = frame
             cap.release()
         elif args["threading"] == "both":
-            pass
+            video_getter = VideoGetter(args["camera"]).start()
+            video_shower = VideoShower(video_getter.frame, win_name="YOLOv3")
+            video_shower.start()
+            while True:
+                if video_getter.stopped or video_shower.stopped:
+                    video_shower.stop()
+                    video_getter.stop()
+                    break
+                start_t = time.time()
+                frame = video_getter.frame
+                bboxes, cls_idx = do_inference(net, frame, device=device)
+                draw_boxes(
+                    frame, bboxes, cls_idx=cls_idx, class_names=class_names
+                )
+
+                fps.append(int(1 / (time.time() - start_t)))
+                cv2.putText(
+                    frame,  f"{int(sum(fps) / num_samples)} fps",
+                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
+                )
+                video_shower.frame = frame
         else:
             cap = cv2.VideoCapture(args["camera"])
             grabbed, frame = cap.read()
@@ -381,7 +401,7 @@ if __name__ == "__main__":
                     frame,  f"{int(sum(fps) / num_samples)} fps",
                     (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9, (255, 255, 255)
                 )
-                cv2.imshow("YOLO", frame)
+                cv2.imshow("YOLOv3", frame)
                 if cv2.waitKey(1) == ord("q"):
                     break
             cap.release()
