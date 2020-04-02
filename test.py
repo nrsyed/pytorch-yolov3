@@ -245,15 +245,15 @@ if __name__ == "__main__":
             args[path_arg] = str(args[path_arg].expanduser().absolute())
 
     device = args["device"]
-    if device.startswith("cuda"):
-        if torch.cuda.is_available():
-            net.cuda()
-        else:
-            device = "cpu"
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        device = "cpu"
 
     net = Darknet(args["config_path"], device=device)
     net.load_weights(args["weights_path"])
     net.eval()
+
+    if device.startswith("cuda"):
+        net.cuda()
 
     class_names = None
     if args["class_list"] is not None and os.path.isfile(args["class_list"]):
