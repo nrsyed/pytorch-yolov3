@@ -47,8 +47,9 @@ class VideoGetter():
 
 
 class VideoShower():
-    def __init__(self, frame=None):
+    def __init__(self, frame=None, win_name=""):
         self.frame = frame
+        self.win_name = win_name
         self.stopped = False
 
     def start(self):
@@ -57,7 +58,7 @@ class VideoShower():
 
     def show(self):
         while not self.stopped:
-            cv2.imshow("Video", self.frame)
+            cv2.imshow(self.win_name, self.frame)
             if cv2.waitKey(1) == ord("q"):
                 self.stopped = True
 
@@ -277,6 +278,10 @@ if __name__ == "__main__":
     source.add_argument(
         "--camera", "-C", type=int, help="Camera or video capture device ID"
     )
+    parser.add_argument(
+        "-t", "--threading", choices=("none", "get", "show", "both"),
+        default="none"
+    )
     args = vars(parser.parse_args())
 
     path_args = (
@@ -309,20 +314,38 @@ if __name__ == "__main__":
         cv2.imshow("img", image)
         cv2.waitKey(0)
     elif args["camera"] is not None:
-        video_getter = VideoGetter(args["camera"]).start()
-        video_shower = VideoShower(video_getter.frame).start()
-
-        while True:
-            if video_getter.stopped or video_shower.stopped:
-                video_shower.stop()
-                video_getter.stop()
-                break
-            frame = video_getter.frame
-            bboxes, cls_idx = do_inference(net, frame, device=device)
-            draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
-            video_shower.frame = frame
-            if cv2.waitKey(1) == ord("q"):
-                break
+        if args["threading"] == "get":
+            #video_getter = VideoGetter(args["camera"]).start()
+            pass
+        elif args["threading"] == "show":
+            cap = cv2.VideoCapture(args["camera"])
+            grabbed, frame = cap.read()
+            video_shower = VideoShower(frame, win_name="YOLO").start()
+            while True:
+                grabbed, frame = cap.read()
+                if not grabbed or video_shower.stopped:
+                    break
+                bboxes, cls_idx = do_inference(net, frame, device=device)
+                draw_boxes(
+                    frame, bboxes, cls_idx=cls_idx, class_names=class_names
+                )
+                video_shower.frame = frame
+        elif args["threading"] == "both":
+            pass
+        else:
+            cap = cv2.VideoCapture(args["camera"])
+            grabbed, frame = cap.read()
+            while True:
+                grabbed, frame = cap.read()
+                if not grabbed:
+                    break
+                bboxes, cls_idx = do_inference(net, frame, device=device)
+                draw_boxes(
+                    frame, bboxes, cls_idx=cls_idx, class_names=class_names
+                )
+                cv2.imshow("YOLO", frame)
+                if cv2.waitKey(1) == ord("q"):
+                    break
 
         cap.release()
         cv2.destroyAllWindows()
