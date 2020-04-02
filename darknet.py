@@ -47,7 +47,7 @@ class YOLOLayer(torch.nn.Module):
         obj_energy = x[:, :, 4:5, :, :]
         class_energy = x[:, :, 5:, :, :]
 
-        bbox_xywh = torch.tensor(xywh_energy, device=self.device)
+        bbox_xywh = xywh_energy.clone().detach()
 
         # Cell offsets C_x and C_y.
         cx = torch.linspace(0, w - 1, w, device=self.device).repeat(h, 1)
@@ -73,11 +73,8 @@ class YOLOLayer(torch.nn.Module):
         bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h)
 
         # Get objectness and class scores.
-        obj_score = torch.tensor(obj_energy, device=self.device).sigmoid()
-
-        class_score = F.softmax(
-            torch.tensor(class_energy, device=self.device), dim=2
-        )
+        obj_score = obj_energy.clone().detach().sigmoid()
+        class_score = F.softmax(class_energy.clone().detach(), dim=2)
 
         max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
         max_class_score.mul_(obj_score)
