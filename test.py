@@ -3,8 +3,8 @@ from collections import deque
 import colorsys
 import os
 import pathlib
-import pdb
 import time
+import threading
 
 import cv2
 import numpy as np
@@ -14,14 +14,25 @@ from darknet import Darknet
 # TODO: consistent variable naming (plural/singular)
 
 
-import functools
-def profile(func):
-    def decorated(*args, **kwargs):
-        start_t = time.time()
-        retval = func(*args, **kwargs)
-        print(f"{func.__name__}: {time.time() - start_t:.4f}")
-        return retval
-    return decorated
+class VideoGetter():
+    def __init__(self, src=0):
+        self.cap = cv2.VideoCapture(src)
+        self.grabbed, self.frame = self.cap.read()
+        self.stopped = False
+
+    def start(self):
+        threading.Thread(target=self.get, args=()).start()
+        return self
+
+    def get(self):
+        while not self.stopped:
+            if not self.grabbed:
+                self.stop()
+            else:
+                self.grabbed, self.frame = self.cap.read()
+
+    def stop(self):
+        self.stopped = True
 
 
 def img_to_tensor(img):
@@ -267,19 +278,20 @@ if __name__ == "__main__":
         cv2.imshow("img", image)
         cv2.waitKey(0)
     elif args["camera"] is not None:
-        cap = cv2.VideoCapture(args["camera"])
-        assert cap.isOpened(), "Error opening video capture device"
-        grabbed, frame = cap.read()
-
+        # Empirically, getting frames in a separate thread yields a
+        # significant performance increase; showing frames does not.
+        video_getter = VideoGetter(args["camera"]).start()
         while True:
-            grabbed, frame = cap.read()
-            if not grabbed:
+            if video_getter.stopped:
                 break
+            frame = video_getter.frame
             bboxes, cls_idx = do_inference(net, frame, device=device)
-            draw_boxes(frame, bboxes, cls_idx=cls_idx, class_names=class_names)
-            cv2.imshow("YOLO", frame)
+            draw_boxes(
+                frame, bboxes, cls_idx=cls_idx, class_names=class_names
+            )
+            cv2.imshow("YOLOv3", frame)
             if cv2.waitKey(1) == ord("q"):
+                video_getter.stop()
                 break
 
-        cap.release()
         cv2.destroyAllWindows()
