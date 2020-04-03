@@ -277,6 +277,20 @@ if __name__ == "__main__":
         draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
         cv2.imshow("img", image)
         cv2.waitKey(0)
+    elif args["video_path"]:
+        cap = cv2.VideoCapture(args["video_path"])
+        while True:
+            grabbed, frame = cap.read()
+            if not grabbed:
+                break
+            bboxes, cls_idx = do_inference(net, frame, device=device)
+            draw_boxes(
+                frame, bboxes, cls_idx=cls_idx, class_names=class_names
+            )
+            cv2.imshow("YOLOv3", frame)
+            if cv2.waitKey(1) == ord("q"):
+                break
+        cap.release()
     elif args["camera"] is not None:
         # Empirically, getting frames in a separate thread yields a
         # significant performance increase; showing frames does not.
@@ -294,4 +308,4 @@ if __name__ == "__main__":
                 video_getter.stop()
                 break
 
-        cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
