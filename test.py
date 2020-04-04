@@ -234,7 +234,13 @@ if __name__ == "__main__":
         default=pathlib.Path("models/yolov3.weights"),
         help="Path to Darknet model weights file"
     )
-    parser.add_argument("--device", "-d", default="cuda")
+    parser.add_argument(
+        "--device", "-d", default="cuda", help="Device (cpu or cuda) to use"
+    )
+    parser.add_argument(
+        "--write-frames", "-W", action="store_true"
+    )
+    parser.add_argument("--fps", action="store_true")
 
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
@@ -295,14 +301,31 @@ if __name__ == "__main__":
         # Empirically, getting frames in a separate thread yields a
         # significant performance increase; showing frames does not.
         video_getter = VideoGetter(args["camera"]).start()
+
+        if args["fps"]:
+            num_fps_frames = 30
+            previous_fps = deque(maxlen=num_fps_frames)
+
         while True:
+            start_time = time.time()
+
             if video_getter.stopped:
                 break
+
             frame = video_getter.frame
             bboxes, cls_idx = do_inference(net, frame, device=device)
             draw_boxes(
                 frame, bboxes, cls_idx=cls_idx, class_names=class_names
             )
+
+            if args["fps"]:
+                previous_fps.append(int(1 / (time.time() - start_time)))
+                cv2.putText(
+                    frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+                    (255, 255, 255)
+                )
+
             cv2.imshow("YOLOv3", frame)
             if cv2.waitKey(1) == ord("q"):
                 video_getter.stop()
