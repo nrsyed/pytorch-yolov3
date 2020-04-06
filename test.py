@@ -35,6 +35,32 @@ class VideoGetter():
         self.stopped = True
 
 
+class VideoShower():
+    def __init__(self, frame=None, win_name=""):
+        self.frame = frame
+        self.win_name = win_name
+        self.stopped = False
+
+    def start(self):
+        threading.Thread(target=self.show, args=()).start()
+        return self
+
+    def show(self):
+        while not self.stopped:
+            # We can actually see an ~8% increase in FPS by only calling
+            # cv2.imshow when a new frame is set with an if statement.
+            if self.frame is not None:
+                cv2.imshow(self.win_name, self.frame)
+                self.frame = None
+
+            if cv2.waitKey(1) == ord("q"):
+                self.stopped = True
+
+    def stop(self):
+        cv2.destroyAllWindows()
+        self.stopped = True
+
+
 def img_to_tensor(img):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = img.astype(np.float32) / 255.0
@@ -238,7 +264,7 @@ if __name__ == "__main__":
         "--device", "-d", default="cuda", help="Device (cpu or cuda) to use"
     )
     parser.add_argument(
-        "--write-frames", "-W", action="store_true"
+        "--write-frames", "-W", default=""
     )
     parser.add_argument("--fps", action="store_true")
 
@@ -301,6 +327,7 @@ if __name__ == "__main__":
         # Empirically, getting frames in a separate thread yields a
         # significant performance increase; showing frames does not.
         video_getter = VideoGetter(args["camera"]).start()
+        video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
 
         if args["fps"]:
             num_fps_frames = 30
@@ -319,16 +346,19 @@ if __name__ == "__main__":
             )
 
             if args["fps"]:
-                previous_fps.append(int(1 / (time.time() - start_time)))
                 cv2.putText(
                     frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
                     (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
                     (255, 255, 255)
                 )
 
-            cv2.imshow("YOLOv3", frame)
-            if cv2.waitKey(1) == ord("q"):
+            video_shower.frame = frame
+
+            if video_getter.stopped or video_shower.stopped:
                 video_getter.stop()
+                video_shower.stop()
                 break
+
+            previous_fps.append(int(1 / (time.time() - start_time)))
 
     cv2.destroyAllWindows()
