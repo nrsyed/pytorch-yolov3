@@ -244,6 +244,69 @@ def do_inference(
     cls_idx = cls_idx[idxs_to_keep]
     return bboxes, cls_idx
 
+def camera(
+    net, device="cuda", class_names=None, cam_id=0, show_fps=False,
+    output_path=None
+):
+    video_getter = VideoGetter(cam_id).start()
+    video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
+
+    if output_path is not None:
+        frames = []
+
+    if show_fps:
+        num_fps_frames = 30
+        previous_fps = deque(maxlen=num_fps_frames)
+
+    start_time = time.time()
+    num_frames = 0
+    while True:
+        loop_start_time = time.time()
+
+        if video_getter.stopped:
+            break
+
+        frame = video_getter.frame
+        bboxes, cls_idx = do_inference(net, frame, device=device)
+        draw_boxes(
+            frame, bboxes, cls_idx=cls_idx, class_names=class_names
+        )
+
+        if show_fps:
+            cv2.putText(
+                frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+                (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+                (255, 255, 255)
+            )
+
+        video_shower.frame = frame
+        if output_path is not None:
+            frames.append(frame)
+
+        if video_getter.stopped or video_shower.stopped:
+            video_getter.stop()
+            video_shower.stop()
+            break
+
+        previous_fps.append(int(1 / (time.time() - loop_start_time)))
+        num_frames += 1
+
+    if output_path is not None:
+        overall_fps = 1 / ((time.time() - start_time) / num_frames)
+        h, w = frame.shape[:2]
+
+        if not output_path.endswith(".mp4"):
+            output_path += ".mp4"
+
+        writer = cv2.VideoWriter(
+            output_path, cv2.VideoWriter_fourcc(*"mp4v"),
+            int(overall_fps), (w, h)
+        )
+
+        for frame in frames:
+            writer.write(frame)
+        writer.release()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -327,64 +390,9 @@ if __name__ == "__main__":
                 break
         cap.release()
     elif args["camera"] is not None:
-        video_getter = VideoGetter(args["camera"]).start()
-        video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
-
-        if args["output"]:
-            frames = []
-
-        if args["fps"]:
-            num_fps_frames = 30
-            previous_fps = deque(maxlen=num_fps_frames)
-
-        start_time = time.time()
-        num_frames = 0
-        while True:
-            loop_start_time = time.time()
-
-            if video_getter.stopped:
-                break
-
-            frame = video_getter.frame
-            bboxes, cls_idx = do_inference(net, frame, device=device)
-            draw_boxes(
-                frame, bboxes, cls_idx=cls_idx, class_names=class_names
-            )
-
-            if args["fps"]:
-                cv2.putText(
-                    frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
-                    (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
-                    (255, 255, 255)
-                )
-
-            video_shower.frame = frame
-            if args["output"]:
-                frames.append(frame)
-
-            if video_getter.stopped or video_shower.stopped:
-                video_getter.stop()
-                video_shower.stop()
-                break
-
-            previous_fps.append(int(1 / (time.time() - loop_start_time)))
-            num_frames += 1
-
-        if args["output"]:
-            overall_fps = 1 / ((time.time() - start_time) / num_frames)
-            h, w = frame.shape[:2]
-
-            filename = args["output"]
-            if not args["output"].endswith(".mp4"):
-                filename += ".mp4"
-
-            writer = cv2.VideoWriter(
-                filename, cv2.VideoWriter_fourcc(*"mp4v"),
-                int(overall_fps), (w, h)
-            )
-            print("writing")
-            for frame in frames:
-                writer.write(frame)
-            writer.release()
+        camera(
+            net, device=device, class_names=class_names, cam_id=args["camera"],
+            show_fps=args["fps"], output_path=args["output_path"]
+        )
 
     cv2.destroyAllWindows()
