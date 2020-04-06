@@ -1,6 +1,7 @@
 import argparse
 from collections import deque
 import colorsys
+import datetime
 import os
 import pathlib
 import time
@@ -264,7 +265,8 @@ if __name__ == "__main__":
         "--device", "-d", default="cuda", help="Device (cpu or cuda) to use"
     )
     parser.add_argument(
-        "--write-frames", "-W", default=""
+        "--output-path", "-o", type=pathlib.Path,
+        help="Path for writing output image/video file"
     )
     parser.add_argument("--fps", action="store_true")
 
@@ -281,7 +283,8 @@ if __name__ == "__main__":
     args = vars(parser.parse_args())
 
     path_args = (
-        "class_list", "config_path", "weights_path", "image_path", "video_path"
+        "class_list", "config_path", "weights_path", "image_path",
+        "video_path", "output_path"
     )
     for path_arg in path_args:
         if args[path_arg] is not None:
@@ -324,17 +327,20 @@ if __name__ == "__main__":
                 break
         cap.release()
     elif args["camera"] is not None:
-        # Empirically, getting frames in a separate thread yields a
-        # significant performance increase; showing frames does not.
         video_getter = VideoGetter(args["camera"]).start()
         video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
+
+        if args["output"]:
+            frames = []
 
         if args["fps"]:
             num_fps_frames = 30
             previous_fps = deque(maxlen=num_fps_frames)
 
+        start_time = time.time()
+        num_frames = 0
         while True:
-            start_time = time.time()
+            loop_start_time = time.time()
 
             if video_getter.stopped:
                 break
@@ -353,12 +359,32 @@ if __name__ == "__main__":
                 )
 
             video_shower.frame = frame
+            if args["output"]:
+                frames.append(frame)
 
             if video_getter.stopped or video_shower.stopped:
                 video_getter.stop()
                 video_shower.stop()
                 break
 
-            previous_fps.append(int(1 / (time.time() - start_time)))
+            previous_fps.append(int(1 / (time.time() - loop_start_time)))
+            num_frames += 1
+
+        if args["output"]:
+            overall_fps = 1 / ((time.time() - start_time) / num_frames)
+            h, w = frame.shape[:2]
+
+            filename = args["output"]
+            if not args["output"].endswith(".mp4"):
+                filename += ".mp4"
+
+            writer = cv2.VideoWriter(
+                filename, cv2.VideoWriter_fourcc(*"mp4v"),
+                int(overall_fps), (w, h)
+            )
+            print("writing")
+            for frame in frames:
+                writer.write(frame)
+            writer.release()
 
     cv2.destroyAllWindows()
