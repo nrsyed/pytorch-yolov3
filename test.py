@@ -292,47 +292,48 @@ if __name__ == "__main__":
     source_args = source_.add_mutually_exclusive_group(required=True)
     source_args.add_argument(
         "--cam", "-C", type=int, metavar="CAM_ID", nargs="?", default=0,
-        help="Camera or video capture device ID [Default: 0]"
+        help="Camera or video capture device ID. [Default: 0]"
     )
     source_args.add_argument(
         "--image", "-I", type=pathlib.Path, metavar="PATH",
-        help="Path to image file"
+        help="Path to image file."
     )
     source_args.add_argument(
         "--video", "-V", type=pathlib.Path, metavar="PATH",
-        help="Path to video file"
+        help="Path to video file."
     )
 
     model_args = parser.add_argument_group(title="model parameters")
     model_args.add_argument(
         "--config", "-c", type=pathlib.Path, required=True, metavar="PATH",
         default=pathlib.Path("models/yolov3.cfg"),
-        help="[Required] Path to Darknet model config file"
+        help="[Required] Path to Darknet model config file."
     )
     model_args.add_argument(
         "--weights", "-w", type=pathlib.Path, required=True, metavar="PATH",
         default=pathlib.Path("models/yolov3.weights"),
-        help="[Required] Path to Darknet model weights file"
+        help="[Required] Path to Darknet model weights file."
     )
     model_args.add_argument(
         "--class-names", "-n", type=pathlib.Path, metavar="PATH",
         help="Path to text file of class names. If omitted, class index is \
-            displayed instead of name"
+            displayed instead of name."
     )
     model_args.add_argument(
         "--device", "-d", type=str, default="cuda",
-        help="Device for inference ('cpu', 'cuda') [Default: 'cuda']"
+        help="Device for inference ('cpu', 'cuda'). [Default: 'cuda']"
     )
 
     other_args = parser.add_argument_group(title="Output/display options")
     other_args.add_argument(
         "--output", "-o", type=pathlib.Path, metavar="PATH",
         help="Path for writing output image/video file. --cam and --video \
-            input options only support .mp4 output filetype"
+            input source options only support .mp4 output filetype. \
+            If --video input source selected, output FPS matches input FPS."
     )
     other_args.add_argument(
         "--show-fps", action="store_true",
-        help="Display frames processed per second (for --cam or --video input)"
+        help="Display frames processed per second (for --cam or --video input)."
     )
 
     args = vars(parser.parse_args())
