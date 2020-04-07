@@ -287,54 +287,57 @@ def detect_cam(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--class-list", "-l", type=pathlib.Path, default=None,
-        help="Path to text file of class names"
+
+    source_ = parser.add_argument_group(title="input source [required]")
+    source_args = source_.add_mutually_exclusive_group(required=True)
+    source_args.add_argument(
+        "--cam", "-C", type=int, metavar="CAM_ID", nargs="?", default=0,
+        help="Camera or video capture device ID [Default: 0]"
     )
-    parser.add_argument(
-        "--config-path", "-c", type=pathlib.Path,
+    source_args.add_argument(
+        "--image", "-I", type=pathlib.Path, metavar="PATH",
+        help="Path to image file"
+    )
+    source_args.add_argument(
+        "--video", "-V", type=pathlib.Path, metavar="PATH",
+        help="Path to video file"
+    )
+
+    model_args = parser.add_argument_group(title="model parameters")
+    model_args.add_argument(
+        "--config", "-c", type=pathlib.Path, required=True, metavar="PATH",
         default=pathlib.Path("models/yolov3.cfg"),
-        help="Path to Darknet model config file"
+        help="[Required] Path to Darknet model config file"
     )
-    parser.add_argument(
-        "--weights-path", "-w", type=pathlib.Path,
+    model_args.add_argument(
+        "--weights", "-w", type=pathlib.Path, required=True, metavar="PATH",
         default=pathlib.Path("models/yolov3.weights"),
-        help="Path to Darknet model weights file"
+        help="[Required] Path to Darknet model weights file"
     )
-    parser.add_argument(
-        "--device", "-d", default="cuda", help="Device (cpu or cuda) to use"
+    model_args.add_argument(
+        "--class-names", "-n", type=pathlib.Path, metavar="PATH",
+        help="Path to text file of class names. If omitted, class index is \
+            displayed instead of name"
     )
-    parser.add_argument(
-        "--output-path", "-o", type=pathlib.Path,
-        help="Path for writing output image/video file"
+    model_args.add_argument(
+        "--device", "-d", type=str, default="cuda",
+        help="Device for inference ('cpu', 'cuda') [Default: 'cuda']"
     )
-    parser.add_argument(
+
+    other_args = parser.add_argument_group(title="Output/display options")
+    other_args.add_argument(
+        "--output", "-o", type=pathlib.Path, metavar="PATH",
+        help="Path for writing output image/video file. --cam and --video \
+            input options only support .mp4 output filetype"
+    )
+    other_args.add_argument(
         "--show-fps", action="store_true",
         help="Display frames processed per second (for --cam or --video input)"
     )
 
-    source_ = parser.add_argument_group(
-        title="source", description="Input source (required)"
-    )
-    source = source_.add_mutually_exclusive_group(required=True)
-    source.add_argument(
-        "--cam", "-C", type=int, metavar="CAM_ID",
-        help="Camera or video capture device ID"
-    )
-    source.add_argument(
-        "--image", "-i", type=pathlib.Path, metavar="IMAGE_PATH",
-        help="Path to image file"
-    )
-    source.add_argument(
-        "--video", "-v", type=pathlib.Path, metavar="VIDEO_PATH",
-        help="Path to video file"
-    )
     args = vars(parser.parse_args())
 
-    path_args = (
-        "class_list", "config_path", "weights_path", "image",
-        "video", "output_path"
-    )
+    path_args = ("class_names", "config", "weights", "image", "video", "output")
     for path_arg in path_args:
         if args[path_arg] is not None:
             args[path_arg] = str(args[path_arg].expanduser().absolute())
@@ -343,16 +346,16 @@ if __name__ == "__main__":
     if device.startswith("cuda") and not torch.cuda.is_available():
         device = "cpu"
 
-    net = Darknet(args["config_path"], device=device)
-    net.load_weights(args["weights_path"])
+    net = Darknet(args["config"], device=device)
+    net.load_weights(args["weights"])
     net.eval()
 
     if device.startswith("cuda"):
         net.cuda()
 
     class_names = None
-    if args["class_list"] is not None and os.path.isfile(args["class_list"]):
-        with open(args["class_list"], "r") as f:
+    if args["class_names"] is not None and os.path.isfile(args["class_names"]):
+        with open(args["class_names"], "r") as f:
             class_names = [line.strip() for line in f.readlines()]
 
     if args["image"]:
@@ -360,14 +363,14 @@ if __name__ == "__main__":
         bboxes, cls_idx = do_inference(net, image, device=device)
         draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
 
-        if args["output_path"] is not None:
-            cv2.imwrite(args["output_path"], image)
+        if args["output"] is not None:
+            cv2.imwrite(args["output"], image)
 
         cv2.imshow("img", image)
         cv2.waitKey(0)
     elif args["video"]:
         frames = None
-        if args["output_path"] is not None:
+        if args["output"] is not None:
             frames = []
 
         cap = cv2.VideoCapture(args["video"])
@@ -386,7 +389,7 @@ if __name__ == "__main__":
 
                 cv2.imshow("YOLOv3", frame)
 
-                if args["output_path"] is not None:
+                if args["output"] is not None:
                     frames.append(frame)
 
                 if cv2.waitKey(1) == ord("q"):
@@ -396,10 +399,10 @@ if __name__ == "__main__":
         finally:
             cap.release()
 
-            if args["output_path"] is not None and frames:
+            if args["output"] is not None and frames:
                 h, w = frames[0].shape[:2]
 
-                output_path = args["output_path"]
+                output_path = args["output"]
                 if not output_path.endswith(".mp4"):
                     output_path += ".mp4"
 
@@ -413,7 +416,7 @@ if __name__ == "__main__":
                 writer.release()
     elif args["cam"] is not None:
         frames = None
-        if args["output_path"] is not None:
+        if args["output"] is not None:
             frames = []
             start_time = time.time()
 
@@ -425,13 +428,13 @@ if __name__ == "__main__":
         except Exception as e:
             raise e
         finally:
-            if args["output_path"] is not None and frames:
+            if args["output"] is not None and frames:
                 elapsed = time.time() - start_time
                 overall_fps = 1 / (elapsed / len(frames))
 
                 h, w = frames[0].shape[:2]
 
-                output_path = args["output_path"]
+                output_path = args["output"]
                 if not output_path.endswith(".mp4"):
                     output_path += ".mp4"
 
