@@ -430,7 +430,7 @@ if __name__ == "__main__":
         finally:
             if args["output"] is not None and frames:
                 elapsed = time.time() - start_time
-                overall_fps = 1 / (elapsed / len(frames))
+                average_fps = 1 / (elapsed / len(frames))
 
                 h, w = frames[0].shape[:2]
 
@@ -440,7 +440,7 @@ if __name__ == "__main__":
 
                 writer = cv2.VideoWriter(
                     output_path, cv2.VideoWriter_fourcc(*"mp4v"),
-                    int(overall_fps), (w, h)
+                    int(average_fps), (w, h)
                 )
 
                 for frame in frames:
