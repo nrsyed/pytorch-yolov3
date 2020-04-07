@@ -41,7 +41,3 @@ def webcam_record(cam_id=0, output_path=None):
     for frame in frames:
         writer.write(frame)
     writer.release()
-
-
-if __name__ == "__main__":
-    webcam_record()

@@ -306,12 +306,10 @@ if __name__ == "__main__":
     model_args = parser.add_argument_group(title="model parameters")
     model_args.add_argument(
         "--config", "-c", type=pathlib.Path, required=True, metavar="PATH",
-        default=pathlib.Path("models/yolov3.cfg"),
         help="[Required] Path to Darknet model config file."
     )
     model_args.add_argument(
         "--weights", "-w", type=pathlib.Path, required=True, metavar="PATH",
-        default=pathlib.Path("models/yolov3.weights"),
         help="[Required] Path to Darknet model weights file."
     )
     model_args.add_argument(
