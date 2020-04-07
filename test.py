@@ -291,7 +291,7 @@ if __name__ == "__main__":
     source_ = parser.add_argument_group(title="input source [required]")
     source_args = source_.add_mutually_exclusive_group(required=True)
     source_args.add_argument(
-        "--cam", "-C", type=int, metavar="CAM_ID", nargs="?", default=0,
+        "--cam", "-C", type=int, metavar="CAM_ID", nargs="?", const=0,
         help="Camera or video capture device ID. [Default: 0]"
     )
     source_args.add_argument(
