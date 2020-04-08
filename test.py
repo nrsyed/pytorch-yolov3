@@ -37,7 +37,7 @@ class VideoGetter():
 
 
 class VideoShower():
-    def __init__(self, frame=None, win_name=""):
+    def __init__(self, frame=None, win_name="Video"):
         self.frame = frame
         self.win_name = win_name
         self.stopped = False
@@ -58,7 +58,7 @@ class VideoShower():
                 self.stopped = True
 
     def stop(self):
-        cv2.destroyAllWindows()
+        cv2.destroyWindow(self.win_name)
         self.stopped = True
 
 
@@ -245,9 +245,8 @@ def do_inference(
     return bboxes, cls_idx
 
 
-def detect_cam(
-    net, device="cuda", cam_id=0, class_names=None, show_fps=False,
-    frames=None
+def detect_in_cam(
+    net, device="cuda", cam_id=0, class_names=None, show_fps=False, frames=None
 ):
     video_getter = VideoGetter(cam_id).start()
     video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
@@ -283,6 +282,49 @@ def detect_cam(
             frames.append(frame)
 
         previous_fps.append(int(1 / (time.time() - loop_start_time)))
+
+
+def detect_in_video(
+    net, filepath, device="cuda", class_names=None, frames=None,
+    show_video=True
+):
+    cap = cv2.VideoCapture(filepath)
+
+    while True:
+        grabbed, frame = cap.read()
+        if not grabbed:
+            break
+
+        bboxes, cls_idx = do_inference(net, frame, device=device)
+        draw_boxes(
+            frame, bboxes, cls_idx=cls_idx, class_names=class_names
+        )
+
+        if args["output"] is not None:
+            frames.append(frame)
+
+        if show_video:
+            cv2.imshow("YOLOv3", frame)
+            if cv2.waitKey(1) == ord("q"):
+                break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+def write_mp4(frames, fps, filepath):
+    if not filepath.endswith(".mp4"):
+        filepath += ".mp4"
+
+    h, w = frames[0].shape[:2]
+
+    writer = cv2.VideoWriter(
+        filepath, cv2.VideoWriter_fourcc(*"mp4v"), int(fps), (w, h)
+    )
+
+    for frame in frames:
+        writer.write(frame)
+    writer.release()
 
 
 if __name__ == "__main__":
@@ -372,47 +414,18 @@ if __name__ == "__main__":
         if args["output"] is not None:
             frames = []
 
-        cap = cv2.VideoCapture(args["video"])
-        fps = cap.get(cv2.CAP_PROP_FPS)
-
-        try:
-            while True:
-                grabbed, frame = cap.read()
-                if not grabbed:
-                    break
-
-                bboxes, cls_idx = do_inference(net, frame, device=device)
-                draw_boxes(
-                    frame, bboxes, cls_idx=cls_idx, class_names=class_names
-                )
-
-                cv2.imshow("YOLOv3", frame)
-
-                if args["output"] is not None:
-                    frames.append(frame)
-
-                if cv2.waitKey(1) == ord("q"):
-                    break
-        except Exception as e:
-            raise e
-        finally:
+            # Get input video FPS.
+            cap = cv2.VideoCapture(args["video"])
+            fps = cap.get(cv2.CAP_PROP_FPS)
             cap.release()
 
-            if args["output"] is not None and frames:
-                h, w = frames[0].shape[:2]
+        detect_in_video(
+            net, filepath=args["video"], device=device,
+            class_names=class_names, frames=frames
+        )
 
-                output_path = args["output"]
-                if not output_path.endswith(".mp4"):
-                    output_path += ".mp4"
-
-                writer = cv2.VideoWriter(
-                    output_path, cv2.VideoWriter_fourcc(*"mp4v"),
-                    int(fps), (w, h)
-                )
-
-                for frame in frames:
-                    writer.write(frame)
-                writer.release()
+        if args["output"] is not None and frames:
+            write_mp4(frames, fps, args["output"])
     elif args["cam"] is not None:
         frames = None
         if args["output"] is not None:
@@ -420,7 +433,7 @@ if __name__ == "__main__":
             start_time = time.time()
 
         try:
-            detect_cam(
+            detect_in_cam(
                 net, device=device, class_names=class_names,
                 cam_id=args["cam"], show_fps=args["show_fps"], frames=frames
             )
@@ -430,20 +443,6 @@ if __name__ == "__main__":
             if args["output"] is not None and frames:
                 elapsed = time.time() - start_time
                 average_fps = 1 / (elapsed / len(frames))
-
-                h, w = frames[0].shape[:2]
-
-                output_path = args["output"]
-                if not output_path.endswith(".mp4"):
-                    output_path += ".mp4"
-
-                writer = cv2.VideoWriter(
-                    output_path, cv2.VideoWriter_fourcc(*"mp4v"),
-                    int(average_fps), (w, h)
-                )
-
-                for frame in frames:
-                    writer.write(frame)
-                writer.release()
+                write_mp4(frames, average_fps, args["output"])
 
     cv2.destroyAllWindows()
