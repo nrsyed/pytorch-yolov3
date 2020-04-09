@@ -373,7 +373,7 @@ if __name__ == "__main__":
     )
     other_args.add_argument(
         "--show-fps", action="store_true",
-        help="Display frames processed per second (for --cam or --video input)."
+        help="Display frames processed per second (for --cam input)."
     )
 
     args = vars(parser.parse_args())
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     net.eval()
 
     if device.startswith("cuda"):
-        net.cuda()
+        net.cuda(device=device)
 
     class_names = None
     if args["class_names"] is not None and os.path.isfile(args["class_names"]):
@@ -400,49 +400,53 @@ if __name__ == "__main__":
             class_names = [line.strip() for line in f.readlines()]
 
     if args["image"]:
+        source = "image"
+    elif args["video"]:
+        source = "video"
+    else:
+        source = "cam"
+
+    if source == "image":
         image = cv2.imread(args["image"])
         bboxes, cls_idx = do_inference(net, image, device=device)
         draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
-
-        if args["output"] is not None:
+        if args["output"]:
             cv2.imwrite(args["output"], image)
-
         cv2.imshow("img", image)
         cv2.waitKey(0)
-    elif args["video"]:
+    else:
         frames = None
-        if args["output"] is not None:
+        if args["output"]:
             frames = []
 
-            # Get input video FPS.
-            cap = cv2.VideoCapture(args["video"])
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-
-        detect_in_video(
-            net, filepath=args["video"], device=device,
-            class_names=class_names, frames=frames
-        )
-
-        if args["output"] is not None and frames:
-            write_mp4(frames, fps, args["output"])
-    elif args["cam"] is not None:
-        frames = None
-        if args["output"] is not None:
-            frames = []
+        if source == "cam":
             start_time = time.time()
 
-        try:
-            detect_in_cam(
-                net, device=device, class_names=class_names,
-                cam_id=args["cam"], show_fps=args["show_fps"], frames=frames
+            # Wrap in try/except block so that writing output video is written
+            # even if an error occurs while streaming webcam input.
+            try:
+                detect_in_cam(
+                    net, device=device, class_names=class_names,
+                    cam_id=args["cam"], show_fps=args["show_fps"], frames=frames
+                )
+            except Exception as e:
+                raise e
+            finally:
+                if args["output"] and frames:
+                    # Get average FPS and write output at that framerate.
+                    fps = 1 / ((time.time() - start_time) / len(frames))
+                    write_mp4(frames, fps, args["output"])
+        elif source == "video":
+            detect_in_video(
+                net, filepath=args["video"], device=device,
+                class_names=class_names, frames=frames
             )
-        except Exception as e:
-            raise e
-        finally:
-            if args["output"] is not None and frames:
-                elapsed = time.time() - start_time
-                average_fps = 1 / (elapsed / len(frames))
-                write_mp4(frames, average_fps, args["output"])
+
+            if args["output"] and frames:
+                # Get input video FPS and write output video at same FPS.
+                cap = cv2.VideoCapture(args["video"])
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                cap.release()
+                write_mp4(frames, fps, args["output"])
 
     cv2.destroyAllWindows()
