@@ -1,4 +1,3 @@
-import pdb
 import re
 
 import numpy as np
@@ -29,17 +28,37 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 class YOLOLayer(torch.nn.Module):
     def __init__(self, anchors, mask, device="cuda"):
+        """
+        anchors (list): List of bounding box anchors (2-tuples of floats).
+        mask (list): Anchor box indices (corresponding to `anchors`) for
+            which to make predictions.
+        device (str): device (eg, "cpu", "cuda") on which to allocate tensors.
+        """
         super().__init__()
         self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
         self.mask = mask
         self.device = device
 
-    def forward(self, x_):
+    def forward(self, x):
+        """
+        Process input tensor and produce bounding box coordinates,
+        predicted class score (probability), and class index.
+
+        Returns:
+            bbox_xywhs: Mx5 tensor of M detections, where dim 1 indices
+                correspond to: center x, center y, width, height, class
+                probability (of class with greatest probability).
+                0 <= x, y <= 1 and correspond to fraction of image size.
+                w, h are absolute pixel sizes (and should be scaled to net
+                info training image width/height).
+            max_class_idx: M element tensor corresponding index of class with
+                max probability for each of M detections.
+        """
         # Introspect number of classes from anchors and input shape.
         num_anchors = len(self.anchors)
-        num_samples, num_predictions, h, w = x_.shape
+        num_samples, num_predictions, h, w = x.shape
         num_classes = int(num_predictions / num_anchors) - 5
-        x = x_.reshape((num_samples, num_anchors, num_classes + 5, h, w))
+        x = x.reshape((num_samples, num_anchors, num_classes + 5, h, w))
 
         # Indices 0-3 corresponds to xywh energies, index 4 corresponds to
         # objectness energy, and 5: correspond to class energies.
@@ -61,9 +80,11 @@ class YOLOLayer(torch.nn.Module):
 
         # Anchor priors P_w and P_h.
         anchors = self.anchors
+
         anchor_w = torch.tensor(
             anchors, device=self.device
         )[:, 0].reshape(1, num_anchors, 1, 1)
+
         anchor_h = torch.tensor(
             anchors, device=self.device
         )[:, 1].reshape(1, num_anchors, 1, 1)
@@ -97,7 +118,14 @@ class YOLOLayer(torch.nn.Module):
 
 def parse_config(fpath):
     """
-    TODO
+    Parse Darknet config file and return a list of network blocks and
+    pertinent information for each block.
+
+    Args:
+        fpath (str): Path to Darknet .cfg file.
+
+    Returns:
+        List of blocks and network info.
     """
 
     with open(fpath, "r") as f:
@@ -134,7 +162,6 @@ def parse_config(fpath):
             return float(raw_val)
         except ValueError:
             return raw_val
-
 
     blocks = []
     net_info = None
@@ -177,6 +204,12 @@ def parse_config(fpath):
 
 
 def blocks2modules(blocks, net_info):
+    """
+    Translate output of `parse_config()` into pytorch modules.
+
+    Returns:
+        torch.nn.modules.container.ModuleList
+    """
     modules = torch.nn.ModuleList()
     
     curr_out_channels = None
@@ -265,6 +298,12 @@ def blocks2modules(blocks, net_info):
 
 class Darknet(torch.nn.Module):
     def __init__(self, config_fpath, device="cuda"):
+        """
+        Args:
+            config_path (str): Path to Darknet .cfg file.
+            device (str): Device (eg, "cpu", "cuda") on which to allocate
+                tensors.
+        """
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
         self.modules_ = blocks2modules(self.blocks, self.net_info)
@@ -288,7 +327,6 @@ class Darknet(torch.nn.Module):
                 # block's "from" field (which is a negative integer/offset).
                 self.blocks_to_cache.add(i - 1)
                 self.blocks_to_cache.add(i + block["from"])
-
 
     def forward(self, x):
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
@@ -333,6 +371,10 @@ class Darknet(torch.nn.Module):
         """
         Refer to
         https://blog.paperspace.com/how-to-implement-a-yolo-v3-object-detector-from-scratch-in-pytorch-part-3/
+
+        Args:
+            weights_path (str): Path to Darknet .weights file.
+
         """
         with open(weights_path, "rb") as f:
             header = np.fromfile(f, dtype=np.int32, count=5)
@@ -343,10 +385,10 @@ class Darknet(torch.nn.Module):
             p = 0
 
             for i, (block, module) in enumerate(zip(self.blocks, self.modules_)):
+                # Only "convolutional" blocks have weights.
                 if block["type"] == "convolutional":
                     conv = module[0]
 
-                    # Only "convolutional" blocks have weights.
                     if "batch_normalize" in block and block["batch_normalize"]:
                         # Convolutional blocks with batch norm have weights
                         # stored in the following order: bn biases, bn weights,
@@ -375,7 +417,6 @@ class Darknet(torch.nn.Module):
                         )
                         p += bn_len
 
-                        
                     else:
                         # Convolutional blocks without batch norm have weights
                         # stored in the following order: conv biases, conv weights.
