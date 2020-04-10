@@ -8,7 +8,7 @@ import torch.nn.functional as F
 class DummyLayer(torch.nn.Module):
     def __init__(self):
         """
-        Empty dummy layer to serve as stand-in for YOLO shortcut and route
+        Empty dummy layer to serve as placeholder for shortcut and route
         layers, which provide connections to previous layers. Actual logic
         is handled in Darknet.forward().
         """
