@@ -481,40 +481,40 @@ if __name__ == "__main__":
     source_ = parser.add_argument_group(title="input source [required]")
     source_args = source_.add_mutually_exclusive_group(required=True)
     source_args.add_argument(
-        "--cam", "-C", type=int, metavar="CAM_ID", nargs="?", const=0,
+        "-C", "--cam", type=int, metavar="cam_id", nargs="?", const=0,
         help="Camera or video capture device ID. [Default: 0]"
     )
     source_args.add_argument(
-        "--image", "-I", type=pathlib.Path, metavar="PATH",
+        "-I", "--image", type=pathlib.Path, metavar="<path>",
         help="Path to image file."
     )
     source_args.add_argument(
-        "--video", "-V", type=pathlib.Path, metavar="PATH",
+        "-V", "--video", type=pathlib.Path, metavar="<path>",
         help="Path to video file."
     )
 
     model_args = parser.add_argument_group(title="model parameters")
     model_args.add_argument(
-        "--config", "-c", type=pathlib.Path, required=True, metavar="PATH",
+        "-c", "--config", type=pathlib.Path, required=True, metavar="<path>",
         help="[Required] Path to Darknet model config file."
     )
     model_args.add_argument(
-        "--weights", "-w", type=pathlib.Path, required=True, metavar="PATH",
-        help="[Required] Path to Darknet model weights file."
+        "-d", "--device", type=str, default="cuda", metavar="<device>",
+        help="Device for inference ('cpu', 'cuda'). [Default: 'cuda']"
     )
     model_args.add_argument(
-        "--class-names", "-n", type=pathlib.Path, metavar="PATH",
+        "-n", "--class-names", type=pathlib.Path, metavar="<path>",
         help="Path to text file of class names. If omitted, class index is \
             displayed instead of name."
     )
     model_args.add_argument(
-        "--device", "-d", type=str, default="cuda",
-        help="Device for inference ('cpu', 'cuda'). [Default: 'cuda']"
+        "-w", "--weights", type=pathlib.Path, required=True, metavar="<path>",
+        help="[Required] Path to Darknet model weights file."
     )
 
     other_args = parser.add_argument_group(title="Output/display options")
     other_args.add_argument(
-        "--output", "-o", type=pathlib.Path, metavar="PATH",
+        "-o", "--output", type=pathlib.Path, metavar="<path>",
         help="Path for writing output image/video file. --cam and --video \
             input source options only support .mp4 output filetype. \
             If --video input source selected, output FPS matches input FPS."
