@@ -372,10 +372,9 @@ def detect_in_cam(
     video_getter = VideoGetter(cam_id).start()
     video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
 
-    if show_fps:
-        # Number of frames to average for computing FPS.
-        num_fps_frames = 30
-        previous_fps = deque(maxlen=num_fps_frames)
+    # Number of frames to average for computing FPS.
+    num_fps_frames = 30
+    previous_fps = deque(maxlen=num_fps_frames)
 
     num_frames = 0
     while True:
@@ -557,10 +556,10 @@ if __name__ == "__main__":
     if source == "image":
         image = cv2.imread(args["image"])
         bbox_tlbr, _, class_idx = do_inference(net, image, device=device)
-        draw_boxes(image, bboxes, class_idx=class_idx, class_names=class_names)
+        draw_boxes(image, bbox_tlbr, class_idx=class_idx, class_names=class_names)
         if args["output"]:
             cv2.imwrite(args["output"], image)
-        cv2.imshow("img", image)
+        cv2.imshow("YOLOv3", image)
         cv2.waitKey(0)
     else:
         frames = None
