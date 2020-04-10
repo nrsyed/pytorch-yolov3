@@ -12,11 +12,15 @@ import numpy as np
 import torch
 from darknet import Darknet
 
-# TODO: consistent variable naming (plural/singular)
-
 
 class VideoGetter():
     def __init__(self, src=0):
+        """
+        Class to read frames from a VideoCapture in a dedicated thread.
+
+        Args:
+            src (int|str): Video source. Int if webcam id, str if path to file.
+        """
         self.cap = cv2.VideoCapture(src)
         self.grabbed, self.frame = self.cap.read()
         self.stopped = False
@@ -26,6 +30,12 @@ class VideoGetter():
         return self
 
     def get(self):
+        """
+        Method called in a thread to continually read frames from `self.cap`.
+        This way, a frame is always ready to be read. Frames are not queued;
+        if a frame is not read before `get()` reads a new frame, previous
+        frame is overwritten and cannot be obtained again.
+        """
         while not self.stopped:
             if not self.grabbed:
                 self.stop()
@@ -38,6 +48,13 @@ class VideoGetter():
 
 class VideoShower():
     def __init__(self, frame=None, win_name="Video"):
+        """
+        Class to show frames in a dedicated thread.
+
+        Args:
+            frame (np.ndarray): (Initial) frame to display.
+            win_name (str): Name of `cv2.imshow()` window.
+        """
         self.frame = frame
         self.win_name = win_name
         self.stopped = False
@@ -47,9 +64,13 @@ class VideoShower():
         return self
 
     def show(self):
+        """
+        Method called within thread to show new frames.
+        """
         while not self.stopped:
             # We can actually see an ~8% increase in FPS by only calling
-            # cv2.imshow when a new frame is set with an if statement.
+            # cv2.imshow when a new frame is set with an if statement. Thus,
+            # set `self.frame` to None after each call to `cv2.imshow()`.
             if self.frame is not None:
                 cv2.imshow(self.win_name, self.frame)
                 self.frame = None
@@ -60,12 +81,6 @@ class VideoShower():
     def stop(self):
         cv2.destroyWindow(self.win_name)
         self.stopped = True
-
-
-def img_to_tensor(img):
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype(np.float32) / 255.0
-    return torch.Tensor(img).permute(2, 0, 1).unsqueeze(0)
 
 
 def unique_colors(num_colors):
@@ -79,63 +94,92 @@ def unique_colors(num_colors):
         yield bgr
 
 
-def draw_boxes(img, bboxes, prob=None, cls_idx=None, class_names=None):
+def draw_boxes(
+    img, bbox_tlbr, class_prob=None, class_idx=None, class_names=None
+):
+    """
+    Draw bboxes (and class names or indices for each bbox) on an image.
+    Bboxes are drawn in-place on the original image; this function does not
+    return a new image.
+
+    If `class_prob` is provided, the prediction probability for each bbox
+    will be displayed along with the bbox. If `class_idx` is provided, the
+    class index of each bbox will be displayed along with the bbox. If both
+    `class_idx` and `class_names` are provided, `class_idx` will be used to
+    determine the class name for each bbox and the class name of each bbox
+    will be displayed along with the bbox.
+
+    If `class_names` is provided, a unique color is used for each class.
+
+    Args:
+        img (np.ndarray): Image on which to draw bboxes.
+        bbox_tlbr (np.ndarray): Mx4 array of M detections.
+        class_prob (np.ndarray): Array of M elements corresponding to predicted
+            class probabilities for each bbox.
+        class_idx (np.ndarray): Array of M elements corresponding to the
+            class index with the greatest probability for each bbox.
+        class_names (list): List of all class names in order.
+    """
+    colors = None
     if class_names is not None:
         colors = dict()
         num_colors = len(class_names)
         colors = list(unique_colors(num_colors))
 
-    for i, bbox in enumerate(bboxes):
-        bbox_str = []
-        if cls_idx is not None:
-            color = colors[cls_idx[i]]
-            if class_names is not None:
-                bbox_str.append(class_names[cls_idx[i]])
-            else:
-                bbox_str.append(str(cls_idx[i]))
+    for i, (tl_x, tl_y, br_x, br_y) in enumerate(bbox_tlbr):
+        bbox_text = []
+        if colors is not None:
+            color = colors[class_idx[i]]
         else:
             color = (0, 255, 0)
 
-        if prob is not None:
-            bbox_str.append("({:.2f})".format(prob[i]))
+        if class_names is not None:
+            bbox_text.append(class_names[class_idx[i]])
+        elif class_idx is not None:
+            bbox_text.append(str(class_idx[i]))
 
-        bbox_str = " ".join(bbox_str)
+        if class_prob is not None:
+            bbox_text.append("({:.2f})".format(class_prob[i]))
 
-        tl_x, tl_y, br_x, br_y = bbox
+        bbox_text = " ".join(bbox_text)
+
         cv2.rectangle(
             img, (tl_x, tl_y), (br_x, br_y), color=color, thickness=2
         )
 
-        if bbox_str:
+        if bbox_text:
             cv2.rectangle(
                 img, (tl_x + 1, tl_y + 1),
-                (tl_x + int(8 * len(bbox_str)), tl_y + 18),
+                (tl_x + int(8 * len(bbox_text)), tl_y + 18),
                 color=(20, 20, 20), thickness=cv2.FILLED
             )
             cv2.putText(
-                img, bbox_str, (tl_x + 1, tl_y + 13), cv2.FONT_HERSHEY_SIMPLEX,
+                img, bbox_text, (tl_x + 1, tl_y + 13), cv2.FONT_HERSHEY_SIMPLEX,
                 0.45, (255, 255, 255), thickness=1
             )
 
 
-def _non_max_suppression(bboxes, prob, iou_thresh=0.3):
+def _non_max_suppression(bbox_tlbr, prob, iou_thresh=0.3):
     """
-    Perform non-maximum suppression on an array of bboxes and
+    Perform non-maximum suppression on an array of bbox_tlbr and
     return the indices of detections to retain.
 
     Derived from:
     https://www.pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
 
     Args:
-        bboxes (np.array): An Mx5 array of bboxes (consisting of M
-            detections/bboxes), where bboxes[:, :4] represent the four
+        bbox_tlbr (np.ndarray): An Mx4 array of bboxes (consisting of M
+            detections/bboxes), where bbox_tlbr[:, :4] represent the four
             bbox coordinates.
 
-        prob (np.array): An array of M elements corresponding to the
+        prob (np.ndarray): An array of M elements corresponding to the
             max class probability of each detection/bbox.
     """
 
-    area = ((bboxes[:,2] - bboxes[:,0]) + 1) * ((bboxes[:,3] - bboxes[:,1]) + 1)
+    area = (
+        ((bbox_tlbr[:,2] - bbox_tlbr[:,0]) + 1)
+        * ((bbox_tlbr[:,3] - bbox_tlbr[:,1]) + 1)
+    )
 
     # Sort detections by probability (largest to smallest).
     idxs = deque(np.argsort(prob)[::-1])
@@ -149,10 +193,10 @@ def _non_max_suppression(bboxes, prob, iou_thresh=0.3):
 
         # Find the coordinates of the regions of overlap between the current
         # detection and all other detections.
-        overlaps_tl_x = np.maximum(bboxes[curr_idx, 0], bboxes[idxs, 0])
-        overlaps_tl_y = np.maximum(bboxes[curr_idx, 1], bboxes[idxs, 1])
-        overlaps_br_x = np.minimum(bboxes[curr_idx, 2], bboxes[idxs, 2])
-        overlaps_br_y = np.minimum(bboxes[curr_idx, 3], bboxes[idxs, 3])
+        overlaps_tl_x = np.maximum(bbox_tlbr[curr_idx, 0], bbox_tlbr[idxs, 0])
+        overlaps_tl_y = np.maximum(bbox_tlbr[curr_idx, 1], bbox_tlbr[idxs, 1])
+        overlaps_br_x = np.minimum(bbox_tlbr[curr_idx, 2], bbox_tlbr[idxs, 2])
+        overlaps_br_y = np.minimum(bbox_tlbr[curr_idx, 3], bbox_tlbr[idxs, 3])
 
         # Compute width and height of overlapping regions.
         overlap_w = np.maximum(0, (overlaps_br_x - overlaps_tl_x) + 1)
@@ -170,41 +214,62 @@ def _non_max_suppression(bboxes, prob, iou_thresh=0.3):
     return idxs_to_keep
 
 
-def non_max_suppression(bboxes, prob, cls_idx=None, iou_thresh=0.3):
+def non_max_suppression(bbox_tlbr, class_prob, class_idx=None, iou_thresh=0.3):
     """
-    TODO
+    Perform non-maximum suppression of bounding boxes.
+
+    Args:
+        bbox_tlbr (np.ndarray): Mx4 array of M bounding boxes, where dim 1
+            indices are: top left x, top left y, bottom right x, bottom
+            right y.
+        class_prob (np.ndarray): Array of M elements corresponding to predicted
+            class probabilities for each bbox.
+        class_idx (np.ndarray): Array of M elements corresponding to the
+            class index with the greatest probability for each bbox.
+        iou_thresh (float): Intersection over union (IOU) threshold for
+            bbox to be considered a duplicate. 0 <= `iou_thresh` < 1.
+
+    Returns:
+        List 
     """
 
-    if cls_idx is not None:
+    if class_idx is not None:
         # Perform per-class non-maximum suppression.
         idxs_to_keep = []
-        classes = set(cls_idx)
-        for class_ in classes:
-            curr_class_idxs = np.where(cls_idx == class_)[0]
-            class_bboxes = bboxes[curr_class_idxs]
-            class_prob = prob[curr_class_idxs]
-            class_idxs_to_keep = _non_max_suppression(class_bboxes, class_prob)
-            idxs_to_keep.extend(curr_class_idxs[class_idxs_to_keep].tolist())
+
+        # Set of unique class indices.
+        unique_class_idxs = set(class_idx)
+
+        for class_ in unique_class_idxs:
+            # Bboxes corresponding to the current class index.
+            curr_class_mask = np.where(class_idx == class_)[0]
+            curr_class_bbox = bbox_tlbr[curr_class_mask]
+            curr_class_prob = class_prob[curr_class_mask]
+
+            curr_class_idxs_to_keep = _non_max_suppression(
+                curr_class_bbox, curr_class_prob, iou_thresh
+            )
+            idxs_to_keep.extend(curr_class_mask[curr_class_idxs_to_keep].tolist())
     else:
-        idxs_to_keep = _non_max_suppression(bboxes, prob, iou_thresh)
+        idxs_to_keep = _non_max_suppression(bbox_tlbr, class_prob, iou_thresh)
     return idxs_to_keep
 
 
-def cxywh_to_tlbr(bboxes):
+def cxywh_to_tlbr(bbox_xywh):
     """
     Args:
-        bboxes (np.array): An MxN array of detections where bboxes[:, :4]
+        bbox_xywh (np.array): An MxN array of detections where bbox_xywh[:, :4]
             correspond to coordinates (center x, center y, width, height).
 
     Returns:
-        An MxN array of detections where bboxes[:, :4] correspond to
+        An MxN array of detections where bbox_xywh[:, :4] correspond to
         coordinates (top left x, top left y, bottom right x, bottom right y).
     """
 
-    tlbr = np.copy(bboxes)
-    tlbr[:, :2] = bboxes[:, :2] - (bboxes[:, 2:4] // 2)
-    tlbr[:, 2:4] = bboxes[:, :2] + (bboxes[:, 2:4] // 2)
-    return tlbr
+    bbox_tlbr = np.copy(bbox_xywh)
+    bbox_tlbr[:, :2] = bbox_xywh[:, :2] - (bbox_xywh[:, 2:4] // 2)
+    bbox_tlbr[:, 2:4] = bbox_xywh[:, :2] + (bbox_xywh[:, 2:4] // 2)
+    return bbox_tlbr
 
 
 def do_inference(
@@ -220,29 +285,29 @@ def do_inference(
 
     out = net.forward(inp)
 
-    bboxes = out["bbox_xywhs"].detach().cpu().numpy()
-    cls_idx = out["max_class_idx"].cpu().numpy()
+    bbox_xywhs = out["bbox_xywhs"].detach().cpu().numpy()
+    class_idx = out["max_class_idx"].cpu().numpy()
 
-    prob = bboxes[:, 4]
-    bboxes = bboxes[:, :4]
+    bbox_xywh = bbox_xywhs[:, :4]
+    class_prob = bbox_xywhs[:, 4]
 
-    mask = prob >= prob_thresh
+    thresh_mask = class_prob >= prob_thresh
 
-    bboxes = bboxes[mask, :]
-    cls_idx = cls_idx[mask]
-    prob = prob[mask]
+    bbox_xywh = bbox_xywh[thresh_mask, :]
+    class_idx = class_idx[thresh_mask]
+    class_prob = class_prob[thresh_mask]
 
-    bboxes[:, [0, 2]] *= orig_cols
-    bboxes[:, [1, 3]] *= orig_rows
-    bboxes = bboxes.astype(np.int)
+    bbox_xywh[:, [0, 2]] *= orig_cols
+    bbox_xywh[:, [1, 3]] *= orig_rows
+    bbox_xywh = bbox_xywh.astype(np.int)
 
-    bboxes = cxywh_to_tlbr(bboxes)
+    bbox_tlbr = cxywh_to_tlbr(bbox_xywh)
     idxs_to_keep = non_max_suppression(
-        bboxes, prob, cls_idx=cls_idx, iou_thresh=nms_iou_thresh
+        bbox_tlbr, class_prob, class_idx=class_idx, iou_thresh=nms_iou_thresh
     )
-    bboxes = bboxes[idxs_to_keep, :]
-    cls_idx = cls_idx[idxs_to_keep]
-    return bboxes, cls_idx
+    bbox_tlbr = bbox_tlbr[idxs_to_keep, :]
+    class_idx = class_idx[idxs_to_keep]
+    return bbox_tlbr, class_idx
 
 
 def detect_in_cam(
@@ -265,9 +330,9 @@ def detect_in_cam(
             break
 
         frame = video_getter.frame
-        bboxes, cls_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, class_idx = do_inference(net, frame, device=device)
         draw_boxes(
-            frame, bboxes, cls_idx=cls_idx, class_names=class_names
+            frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
 
         if show_fps:
@@ -295,9 +360,9 @@ def detect_in_video(
         if not grabbed:
             break
 
-        bboxes, cls_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, class_idx = do_inference(net, frame, device=device)
         draw_boxes(
-            frame, bboxes, cls_idx=cls_idx, class_names=class_names
+            frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
 
         if args["output"] is not None:
@@ -408,8 +473,8 @@ if __name__ == "__main__":
 
     if source == "image":
         image = cv2.imread(args["image"])
-        bboxes, cls_idx = do_inference(net, image, device=device)
-        draw_boxes(image, bboxes, cls_idx=cls_idx, class_names=class_names)
+        bboxes, class_idx = do_inference(net, image, device=device)
+        draw_boxes(image, bboxes, class_idx=class_idx, class_names=class_names)
         if args["output"]:
             cv2.imwrite(args["output"], image)
         cv2.imshow("img", image)
