@@ -7,6 +7,11 @@ import torch.nn.functional as F
 
 class DummyLayer(torch.nn.Module):
     def __init__(self):
+        """
+        Empty dummy layer to serve as stand-in for YOLO shortcut and route
+        layers, which provide connections to previous layers. Actual logic
+        is handled in Darknet.forward().
+        """
         super().__init__()
 
 
@@ -212,6 +217,9 @@ def blocks2modules(blocks, net_info):
     """
     modules = torch.nn.ModuleList()
     
+    # Track number of channels (filters) in the output of each layer; this
+    # information is necessary to determine layer input/output shapes for
+    # various layers.
     curr_out_channels = None
     prev_layer_out_channels = net_info["channels"]
     out_channels_list = []
@@ -242,7 +250,8 @@ def blocks2modules(blocks, net_info):
                 acti = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
                 module.add_module("leaky_{}".format(i), acti)
             elif block["activation"] == "linear":
-                # NOTE: Darknet src files specify "linear" vs "relu".
+                # NOTE: Darknet src files call out "linear" vs "relu" but we
+                # use ReLU here.
                 acti = torch.nn.ReLU(inplace=True)
 
             # Update the number of current (output) channels.
@@ -256,6 +265,8 @@ def blocks2modules(blocks, net_info):
             module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
+            # Route layer concatenates outputs (across channel dim); add dummy
+            # layer and handle the actual logic in Darknet.forward().
             module.add_module("route_{}".format(i), DummyLayer())
 
             out_channels = sum(
@@ -265,6 +276,9 @@ def blocks2modules(blocks, net_info):
             curr_out_channels = out_channels
 
         elif block["type"] == "shortcut":
+            # Shortcut layer is a residual layer that sums output from previous
+            # layer and a different previous layers; add dummy layer and handle
+            # the actual logic in Darknet.forward().
             module.add_module("shortcut_{}".format(i), DummyLayer())
 
             if "activation" in block:
@@ -329,6 +343,10 @@ class Darknet(torch.nn.Module):
                 self.blocks_to_cache.add(i + block["from"])
 
     def forward(self, x):
+        """
+        Returns:
+            Dictionary of bbox coordinates/scores and bbox class indices.
+        """
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
         bbox_list, max_class_idx_list = [], []
@@ -374,7 +392,6 @@ class Darknet(torch.nn.Module):
 
         Args:
             weights_path (str): Path to Darknet .weights file.
-
         """
         with open(weights_path, "rb") as f:
             header = np.fromfile(f, dtype=np.int32, count=5)
