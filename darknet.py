@@ -1,15 +1,17 @@
-import pdb
 import re
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-# TODO: support YOLOv3-spp
 
-
-class EmptyLayer(torch.nn.Module):
+class DummyLayer(torch.nn.Module):
     def __init__(self):
+        """
+        Empty dummy layer to serve as placeholder for shortcut and route
+        layers, which provide connections to previous layers. Actual logic
+        is handled in Darknet.forward().
+        """
         super().__init__()
 
 
@@ -19,8 +21,9 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
     https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
     """
     def forward(self, input_):
-        if self.kernel_size == 2 and self.stride == 1:
-            zero_pad = torch.nn.ZeroPad2d((0, 1, 0, 1))
+        if self.kernel_size > 1 and self.stride == 1:
+            padding = self.kernel_size - 1
+            zero_pad = torch.nn.ZeroPad2d((0, padding, 0, padding))
             input_ = zero_pad(input_)
         return F.max_pool2d(
             input_, self.kernel_size, self.stride, self.padding,
@@ -29,23 +32,38 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    """
-    NOTE: the number of object classes can be deduced from the anchors and
-    anchor mask and does not need to be explicitly provided or stored as part
-    of this class.
-    """
-
-    def __init__(self, anchors, mask):
+    def __init__(self, anchors, mask, device="cuda"):
+        """
+        anchors (list): List of bounding box anchors (2-tuples of floats).
+        mask (list): Anchor box indices (corresponding to `anchors`) for
+            which to make predictions.
+        device (str): device (eg, "cpu", "cuda") on which to allocate tensors.
+        """
         super().__init__()
-        self.mask = mask
         self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
+        self.mask = mask
+        self.device = device
 
-    def forward(self, x_):
+    def forward(self, x):
+        """
+        Process input tensor and produce bounding box coordinates,
+        predicted class score (probability), and class index.
+
+        Returns:
+            bbox_xywhs: Mx5 tensor of M detections, where dim 1 indices
+                correspond to: center x, center y, width, height, class
+                probability (of class with greatest probability).
+                0 <= x, y <= 1 and correspond to fraction of image size.
+                w, h are absolute pixel sizes (and should be scaled to net
+                info training image width/height).
+            max_class_idx: M element tensor corresponding index of class with
+                max probability for each of M detections.
+        """
         # Introspect number of classes from anchors and input shape.
         num_anchors = len(self.anchors)
-        num_samples, num_predictions, h, w = x_.shape
+        num_samples, num_predictions, h, w = x.shape
         num_classes = int(num_predictions / num_anchors) - 5
-        x = x_.reshape((num_samples, num_anchors, num_classes + 5, h, w))
+        x = x.reshape((num_samples, num_anchors, num_classes + 5, h, w))
 
         # Indices 0-3 corresponds to xywh energies, index 4 corresponds to
         # objectness energy, and 5: correspond to class energies.
@@ -53,11 +71,13 @@ class YOLOLayer(torch.nn.Module):
         obj_energy = x[:, :, 4:5, :, :]
         class_energy = x[:, :, 5:, :, :]
 
-        bbox_xywh = torch.Tensor(xywh_energy)
+        bbox_xywh = xywh_energy.clone().detach()
 
         # Cell offsets C_x and C_y.
-        cx = torch.linspace(0, w - 1, w).repeat(h, 1)
-        cy = torch.linspace(0, h - 1, h).repeat(w, 1).t().contiguous()
+        cx = torch.linspace(0, w - 1, w, device=self.device).repeat(h, 1)
+        cy = torch.linspace(
+            0, h - 1, h, device=self.device
+        ).repeat(w, 1).t().contiguous()
 
         # Get bbox center x and y coordinates.
         bbox_xywh[:, :, 0, :, :].sigmoid_().add_(cx).div_(w)
@@ -65,17 +85,22 @@ class YOLOLayer(torch.nn.Module):
 
         # Anchor priors P_w and P_h.
         anchors = self.anchors
-        anchor_w = torch.Tensor(anchors)[:, 0].reshape(1, num_anchors, 1, 1)
-        anchor_h = torch.Tensor(anchors)[:, 1].reshape(1, num_anchors, 1, 1)
+
+        anchor_w = torch.tensor(
+            anchors, device=self.device
+        )[:, 0].reshape(1, num_anchors, 1, 1)
+
+        anchor_h = torch.tensor(
+            anchors, device=self.device
+        )[:, 1].reshape(1, num_anchors, 1, 1)
 
         # Get bbox width and height.
         bbox_xywh[:, :, 2, :, :].exp_().mul_(anchor_w)
         bbox_xywh[:, :, 3, :, :].exp_().mul_(anchor_h)
 
         # Get objectness and class scores.
-        obj_score = torch.Tensor(obj_energy).sigmoid()
-
-        class_score = F.softmax(torch.Tensor(class_energy), dim=2)
+        obj_score = obj_energy.clone().detach().sigmoid()
+        class_score = F.softmax(class_energy.clone().detach(), dim=2)
 
         max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
         max_class_score.mul_(obj_score)
@@ -98,7 +123,14 @@ class YOLOLayer(torch.nn.Module):
 
 def parse_config(fpath):
     """
-    TODO
+    Parse Darknet config file and return a list of network blocks and
+    pertinent information for each block.
+
+    Args:
+        fpath (str): Path to Darknet .cfg file.
+
+    Returns:
+        List of blocks and network info.
     """
 
     with open(fpath, "r") as f:
@@ -135,7 +167,6 @@ def parse_config(fpath):
             return float(raw_val)
         except ValueError:
             return raw_val
-
 
     blocks = []
     net_info = None
@@ -178,8 +209,17 @@ def parse_config(fpath):
 
 
 def blocks2modules(blocks, net_info):
+    """
+    Translate output of `parse_config()` into pytorch modules.
+
+    Returns:
+        torch.nn.modules.container.ModuleList
+    """
     modules = torch.nn.ModuleList()
     
+    # Track number of channels (filters) in the output of each layer; this
+    # information is necessary to determine layer input/output shapes for
+    # various layers.
     curr_out_channels = None
     prev_layer_out_channels = net_info["channels"]
     out_channels_list = []
@@ -210,7 +250,8 @@ def blocks2modules(blocks, net_info):
                 acti = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
                 module.add_module("leaky_{}".format(i), acti)
             elif block["activation"] == "linear":
-                # NOTE: Darknet src files specify "linear" vs "relu".
+                # NOTE: Darknet src files call out "linear" vs "relu" but we
+                # use ReLU here.
                 acti = torch.nn.ReLU(inplace=True)
 
             # Update the number of current (output) channels.
@@ -224,7 +265,9 @@ def blocks2modules(blocks, net_info):
             module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
-            module.add_module("route_{}".format(i), EmptyLayer())
+            # Route layer concatenates outputs (across channel dim); add dummy
+            # layer and handle the actual logic in Darknet.forward().
+            module.add_module("route_{}".format(i), DummyLayer())
 
             out_channels = sum(
                 out_channels_list[layer_idx] for layer_idx in block["layers"]
@@ -233,7 +276,10 @@ def blocks2modules(blocks, net_info):
             curr_out_channels = out_channels
 
         elif block["type"] == "shortcut":
-            module.add_module("shortcut_{}".format(i), EmptyLayer())
+            # Shortcut layer is a residual layer that sums output from previous
+            # layer and a different previous layers; add dummy layer and handle
+            # the actual logic in Darknet.forward().
+            module.add_module("shortcut_{}".format(i), DummyLayer())
 
             if "activation" in block:
                 if block["activation"] == "leaky":
@@ -265,10 +311,17 @@ def blocks2modules(blocks, net_info):
 
 
 class Darknet(torch.nn.Module):
-    def __init__(self, config_fpath):
+    def __init__(self, config_fpath, device="cuda"):
+        """
+        Args:
+            config_path (str): Path to Darknet .cfg file.
+            device (str): Device (eg, "cpu", "cuda") on which to allocate
+                tensors.
+        """
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
         self.modules_ = blocks2modules(self.blocks, self.net_info)
+        self.device = device
 
         # Determine the indices of the layers that will have to be cached
         # for route and shortcut connections.
@@ -289,8 +342,11 @@ class Darknet(torch.nn.Module):
                 self.blocks_to_cache.add(i - 1)
                 self.blocks_to_cache.add(i + block["from"])
 
-
     def forward(self, x):
+        """
+        Returns:
+            Dictionary of bbox coordinates/scores and bbox class indices.
+        """
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
         bbox_list, max_class_idx_list = [], []
@@ -312,14 +368,15 @@ class Darknet(torch.nn.Module):
             if i in cached_outputs:
                 cached_outputs[i] = x
 
-            #print("{0:>2}: {2} ({1})".format(i, block["type"], x.shape))
-
         # Concatenate predictions from each scale.
         bbox_xywhs = torch.cat(bbox_list, dim=0)
         max_class_idx = torch.cat(max_class_idx_list)
 
         # Scale bbox w and h based on training width/height from net info.
-        train_wh = torch.Tensor([self.net_info["width"], self.net_info["height"]])
+        train_wh = torch.tensor(
+            [self.net_info["width"], self.net_info["height"]],
+            device=self.device
+        )
         bbox_xywhs[:, 2:4].div_(train_wh)
 
         return {
@@ -327,10 +384,14 @@ class Darknet(torch.nn.Module):
             "max_class_idx": max_class_idx,
         }
 
+
     def load_weights(self, weights_path):
         """
         Refer to
         https://blog.paperspace.com/how-to-implement-a-yolo-v3-object-detector-from-scratch-in-pytorch-part-3/
+
+        Args:
+            weights_path (str): Path to Darknet .weights file.
         """
         with open(weights_path, "rb") as f:
             header = np.fromfile(f, dtype=np.int32, count=5)
@@ -341,10 +402,10 @@ class Darknet(torch.nn.Module):
             p = 0
 
             for i, (block, module) in enumerate(zip(self.blocks, self.modules_)):
+                # Only "convolutional" blocks have weights.
                 if block["type"] == "convolutional":
                     conv = module[0]
 
-                    # Only "convolutional" blocks have weights.
                     if "batch_normalize" in block and block["batch_normalize"]:
                         # Convolutional blocks with batch norm have weights
                         # stored in the following order: bn biases, bn weights,
@@ -373,7 +434,6 @@ class Darknet(torch.nn.Module):
                         )
                         p += bn_len
 
-                        
                     else:
                         # Convolutional blocks without batch norm have weights
                         # stored in the following order: conv biases, conv weights.
@@ -386,3 +446,4 @@ class Darknet(torch.nn.Module):
                     conv_weights = torch.from_numpy(weights[p:p + num_weights])
                     conv.weight.data.copy_(conv_weights.view_as(conv.weight.data))
                     p += num_weights
+        return self
