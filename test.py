@@ -12,6 +12,8 @@ import numpy as np
 import torch
 from darknet import Darknet
 
+# TODO: allow str/file/path pointer for webcam inference.
+
 
 class VideoGetter():
     def __init__(self, src=0):
@@ -85,7 +87,10 @@ class VideoShower():
 
 def unique_colors(num_colors):
     """
-    Yield N unique BGR colors using HSV color space as an intermediate.
+    Yield `num_colors` unique BGR colors. Uses HSV space as intermediate.
+
+    Args:
+        num_colors (int): Number of colors to yield.
     """
 
     for H in np.linspace(0, 1, num_colors, endpoint=False):
@@ -171,11 +176,15 @@ def _non_max_suppression(bbox_tlbr, prob, iou_thresh=0.3):
         bbox_tlbr (np.ndarray): An Mx4 array of bboxes (consisting of M
             detections/bboxes), where bbox_tlbr[:, :4] represent the four
             bbox coordinates.
-
         prob (np.ndarray): An array of M elements corresponding to the
             max class probability of each detection/bbox.
+
+    Returns:
+        List of bbox indices to keep (ie, discard everything except
+        `bbox_tlbr[idxs_to_keep]`).
     """
 
+    # Compute area of each bbox.
     area = (
         ((bbox_tlbr[:,2] - bbox_tlbr[:,0]) + 1)
         * ((bbox_tlbr[:,3] - bbox_tlbr[:,1]) + 1)
@@ -216,7 +225,10 @@ def _non_max_suppression(bbox_tlbr, prob, iou_thresh=0.3):
 
 def non_max_suppression(bbox_tlbr, class_prob, class_idx=None, iou_thresh=0.3):
     """
-    Perform non-maximum suppression of bounding boxes.
+    Perform non-maximum suppression (NMS) of bounding boxes. If `class_idx` is
+    provided, per-class NMS is performed by performing NMS on each class and
+    combining the results. Else, bboxes are suppressed without regard for
+    class.
 
     Args:
         bbox_tlbr (np.ndarray): Mx4 array of M bounding boxes, where dim 1
@@ -225,12 +237,15 @@ def non_max_suppression(bbox_tlbr, class_prob, class_idx=None, iou_thresh=0.3):
         class_prob (np.ndarray): Array of M elements corresponding to predicted
             class probabilities for each bbox.
         class_idx (np.ndarray): Array of M elements corresponding to the
-            class index with the greatest probability for each bbox.
+            class index with the greatest probability for each bbox. If
+            provided, per-class NMS is performed; else, all bboxes are
+            treated as a single class.
         iou_thresh (float): Intersection over union (IOU) threshold for
             bbox to be considered a duplicate. 0 <= `iou_thresh` < 1.
 
     Returns:
-        List 
+        List of bbox indices to keep (ie, discard everything except
+        `bbox_tlbr[idxs_to_keep]`).
     """
 
     if class_idx is not None:
@@ -275,6 +290,27 @@ def cxywh_to_tlbr(bbox_xywh):
 def do_inference(
     net, image, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
 ):
+    """
+    Run inference on an image and return the corresponding bbox coordinates,
+    bbox class probabilities, and bbox class indices.
+
+    Args:
+        net (torch.nn.Module): Instance of network class derived from
+            torch.nn.Module. `net.forward()` will be run.
+        image (np.ndarray): Image array.
+        device (str): Device for inference (eg, "cpu", "cuda").
+        prob_thresh (float): Probability threshold for detections to keep.
+            0 <= prob_thresh < 1.
+        nms_iou_thresh (float): Intersection over union (IOU) threshold for
+            non-maximum suppression (NMS). Per-class NMS is performed.
+        resize (bool): If True, resize `image` to dimensions given by the
+            `net_info` attribute/block of `net` (from the Darknet .cfg file).
+
+    Returns:
+        bbox_tlbr (np.ndarray): Mx4 array of bbox top left/bottom right coords
+        class_prob (np.ndarray): Array of M predicted class probabilities.
+        class_idx (np.ndarray): Array of M predicted class indices.
+    """
     orig_rows, orig_cols = image.shape[:2]
     net_info = net.net_info
     if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
@@ -307,16 +343,36 @@ def do_inference(
     )
     bbox_tlbr = bbox_tlbr[idxs_to_keep, :]
     class_idx = class_idx[idxs_to_keep]
-    return bbox_tlbr, class_idx
+
+    return bbox_tlbr, class_prob, class_idx
 
 
 def detect_in_cam(
-    net, device="cuda", cam_id=0, class_names=None, show_fps=False, frames=None
+    net, cam_id=0, device="cuda", class_names=None, show_fps=False, frames=None
 ):
+    """
+    Run and display real-time inference on a webcam stream.
+
+    Performs inference on a webcam stream, draw bounding boxes on the frame,
+    and display the resulting video in real time.
+
+    Args:
+        net (torch.nn.Module): Instance of network class derived from
+            torch.nn.Module. `net.forward()` will be run.
+        cam_id (int): Camera device id.
+        device (str): Device for inference (eg, "cpu", "cuda").
+        class_names (list): List of all model class names in order.
+        show_fps (bool): Whether to display current frames processed per second.
+        frames (list): Optional list to populate with frames being displayed;
+            can be used to write or further process frames after this function
+            completes. Because mutables (like lists) are passed by reference
+            and are modified in-place, this function has no return value.
+    """
     video_getter = VideoGetter(cam_id).start()
     video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
 
     if show_fps:
+        # Number of frames to average for computing FPS.
         num_fps_frames = 30
         previous_fps = deque(maxlen=num_fps_frames)
 
@@ -330,7 +386,7 @@ def detect_in_cam(
             break
 
         frame = video_getter.frame
-        bbox_tlbr, class_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -353,6 +409,25 @@ def detect_in_video(
     net, filepath, device="cuda", class_names=None, frames=None,
     show_video=True
 ):
+    """
+    Run and optionally display inference on a video file.
+
+    Performs inference on a video, draw bounding boxes on the frame,
+    and optionally display the resulting video.
+
+    Args:
+        net (torch.nn.Module): Instance of network class derived from
+            torch.nn.Module. `net.forward()` will be run.
+        filepath (str): Path to video file.
+        device (str): Device for inference (eg, "cpu", "cuda").
+        cam_id (int): Camera device id.
+        class_names (list): List of all model class names in order.
+        frames (list): Optional list to populate with frames being displayed;
+            can be used to write or further process frames after this function
+            completes. Because mutables (like lists) are passed by reference
+            and are modified in-place, this function has no return value.
+        show_video (bool): Whether to display processed video during processing.
+    """
     cap = cv2.VideoCapture(filepath)
 
     while True:
@@ -360,7 +435,7 @@ def detect_in_video(
         if not grabbed:
             break
 
-        bbox_tlbr, class_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -378,6 +453,14 @@ def detect_in_video(
 
 
 def write_mp4(frames, fps, filepath):
+    """
+    Write provided frames to an .mp4 video.
+
+    Args:
+        frames (list): List of frames (np.ndarray).
+        fps (int): Framerate (frames per second) of the output video.
+        filepath (str): Path to output video file.
+    """
     if not filepath.endswith(".mp4"):
         filepath += ".mp4"
 
@@ -473,7 +556,7 @@ if __name__ == "__main__":
 
     if source == "image":
         image = cv2.imread(args["image"])
-        bboxes, class_idx = do_inference(net, image, device=device)
+        bbox_tlbr, _, class_idx = do_inference(net, image, device=device)
         draw_boxes(image, bboxes, class_idx=class_idx, class_names=class_names)
         if args["output"]:
             cv2.imwrite(args["output"], image)
