@@ -91,6 +91,9 @@ def unique_colors(num_colors):
 
     Args:
         num_colors (int): Number of colors to yield.
+
+    Yields:
+        3-tuple of 8-bit BGR values.
     """
 
     for H in np.linspace(0, 1, num_colors, endpoint=False):
@@ -166,8 +169,8 @@ def draw_boxes(
 
 def _non_max_suppression(bbox_tlbr, prob, iou_thresh=0.3):
     """
-    Perform non-maximum suppression on an array of bbox_tlbr and
-    return the indices of detections to retain.
+    Perform non-maximum suppression on an array of bboxes and return the
+    indices of detections to retain.
 
     Derived from:
     https://www.pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
@@ -277,7 +280,7 @@ def cxywh_to_tlbr(bbox_xywh):
             correspond to coordinates (center x, center y, width, height).
 
     Returns:
-        An MxN array of detections where bbox_xywh[:, :4] correspond to
+        An MxN array of detections where bbox_tlbr[:, :4] correspond to
         coordinates (top left x, top left y, bottom right x, bottom right y).
     """
 
@@ -295,8 +298,7 @@ def do_inference(
     bbox class probabilities, and bbox class indices.
 
     Args:
-        net (torch.nn.Module): Instance of network class derived from
-            torch.nn.Module. `net.forward()` will be run.
+        net (torch.nn.Module): Instance of network class.
         image (np.ndarray): Image array.
         device (str): Device for inference (eg, "cpu", "cuda").
         prob_thresh (float): Probability threshold for detections to keep.
@@ -357,8 +359,7 @@ def detect_in_cam(
     and display the resulting video in real time.
 
     Args:
-        net (torch.nn.Module): Instance of network class derived from
-            torch.nn.Module. `net.forward()` will be run.
+        net (torch.nn.Module): Instance of network class.
         cam_id (int): Camera device id.
         device (str): Device for inference (eg, "cpu", "cuda").
         class_names (list): List of all model class names in order.
@@ -416,8 +417,7 @@ def detect_in_video(
     and optionally display the resulting video.
 
     Args:
-        net (torch.nn.Module): Instance of network class derived from
-            torch.nn.Module. `net.forward()` will be run.
+        net (torch.nn.Module): Instance of network class.
         filepath (str): Path to video file.
         device (str): Device for inference (eg, "cpu", "cuda").
         cam_id (int): Camera device id.
