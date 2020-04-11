@@ -5,6 +5,9 @@ import torch
 import torch.nn.functional as F
 
 
+DEFAULT_DEVICE="cpu"
+
+
 class DummyLayer(torch.nn.Module):
     def __init__(self):
         """
@@ -32,7 +35,7 @@ class MaxPool2dPad(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    def __init__(self, anchors, mask, device="cuda"):
+    def __init__(self, anchors, mask, device=DEFAULT_DEVICE):
         """
         anchors (list): List of bounding box anchors (2-tuples of floats).
         mask (list): Anchor box indices (corresponding to `anchors`) for
@@ -208,7 +211,7 @@ def parse_config(fpath):
     return blocks, net_info
 
 
-def blocks2modules(blocks, net_info):
+def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
     """
     Translate output of `parse_config()` into pytorch modules.
 
@@ -300,7 +303,7 @@ def blocks2modules(blocks, net_info):
             module.add_module("upsample_{}".format(i), upsample)
 
         elif block["type"] == "yolo":
-            yolo = YOLOLayer(block["anchors"], block["mask"])
+            yolo = YOLOLayer(block["anchors"], block["mask"], device=device)
             module.add_module("yolo_{}".format(i), yolo)
 
         modules.append(module)
@@ -311,7 +314,7 @@ def blocks2modules(blocks, net_info):
 
 
 class Darknet(torch.nn.Module):
-    def __init__(self, config_fpath, device="cuda"):
+    def __init__(self, config_fpath, device=DEFAULT_DEVICE):
         """
         Args:
             config_path (str): Path to Darknet .cfg file.
@@ -320,7 +323,9 @@ class Darknet(torch.nn.Module):
         """
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
-        self.modules_ = blocks2modules(self.blocks, self.net_info)
+        self.modules_ = blocks2modules(
+            self.blocks, self.net_info, device=device
+        )
         self.device = device
 
         # Determine the indices of the layers that will have to be cached
