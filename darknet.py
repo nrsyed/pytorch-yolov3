@@ -18,9 +18,9 @@ class DummyLayer(torch.nn.Module):
         super().__init__()
 
 
-class MaxPool2dPad(torch.nn.MaxPool2d):
+class MaxPool2d(torch.nn.MaxPool2d):
     """
-    Hacked MaxPool2d class to replicate "same" padding; refer to
+    Monkey patched MaxPool2d class to replicate "same" padding; refer to
     https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
     """
     def forward(self, input_):
@@ -39,7 +39,8 @@ class YOLOLayer(torch.nn.Module):
         """
         anchors (list): List of bounding box anchors (2-tuples of floats).
         mask (list): Anchor box indices (corresponding to `anchors`) for
-            which to make predictions.
+            which to make predictions, eg, [3, 4, 5] would indicate that only
+            `anchors[3:6]` should be used.
         device (str): device (eg, "cpu", "cuda") on which to allocate tensors.
         """
         super().__init__()
@@ -49,18 +50,18 @@ class YOLOLayer(torch.nn.Module):
 
     def forward(self, x):
         """
-        Process input tensor and produce bounding box coordinates,
-        predicted class score (probability), and class index.
+        Process input tensor and produce bounding box coordinates, class
+        probability, and class index.
 
         Returns:
             bbox_xywhs: Mx5 tensor of M detections, where dim 1 indices
                 correspond to: center x, center y, width, height, class
                 probability (of class with greatest probability).
-                0 <= x, y <= 1 and correspond to fraction of image size.
-                w, h are absolute pixel sizes (and should be scaled to net
-                info training image width/height).
-            max_class_idx: M element tensor corresponding index of class with
-                max probability for each of M detections.
+                0 <= x, y <= 1 (fractions of image size). w and h are integer
+                values in pixels and should be scaled to net info training
+                image width/height.
+            max_class_idx: M element tensor corresponding to index of class
+                with greatest probability for each detection.
         """
         # Introspect number of classes from anchors and input shape.
         num_anchors = len(self.anchors)
@@ -118,7 +119,7 @@ class YOLOLayer(torch.nn.Module):
 
         # Concatenate bbox coordinates and max class scores such that indices
         # 0-3 of each bbox correspond to its xywh coordinates and index 4 of
-        # each bbox corresponds to its max class score (i.e., confidence).
+        # each bbox corresponds to its max class score (probability).
         bbox_xywhs = torch.cat((bbox_xywh, max_class_score), dim=1)
 
         return bbox_xywhs, max_class_idx
@@ -185,10 +186,9 @@ def parse_config(fpath):
             else:
                 val = str2type(raw_val.strip())
 
-            # If this is a "route" block, its "layers" field
-            # contains either a single integer or several integers. If single
-            # integer, make it a list for convenience (avoids having to check
-            # type when creating modules and running net.forward(), etc.).
+            # If this is a "route" block, its "layers" field contains either
+            # a single integer or several integers. If single integer, make it
+            # a list for consistency.
             if (
                 block["type"] == "route"
                 and key == "layers"
@@ -197,7 +197,8 @@ def parse_config(fpath):
                 val = [val]
 
             # If this is a "yolo" block, it contains an "anchors" field
-            # consisting of pairs of anchors; group anchors into chunks of two.
+            # consisting of (anchor width, anchor height) pairs of values;
+            # thus, we group anchor values into chunks of two.
             if key == "anchors":
                 val = [val[i:i+2] for i in range(0, len(val), 2)]
 
@@ -216,13 +217,12 @@ def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
     Translate output of `parse_config()` into pytorch modules.
 
     Returns:
-        torch.nn.modules.container.ModuleList
+        torch.nn.ModuleList
     """
     modules = torch.nn.ModuleList()
     
     # Track number of channels (filters) in the output of each layer; this
-    # information is necessary to determine layer input/output shapes for
-    # various layers.
+    # is necessary to determine layer input/output shapes for various layers.
     curr_out_channels = None
     prev_layer_out_channels = net_info["channels"]
     out_channels_list = []
@@ -262,13 +262,13 @@ def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
         
         elif block["type"] == "maxpool":
             stride = block["stride"]
-            maxpool = MaxPool2dPad(
+            maxpool = MaxPool2d(
                 kernel_size=block["size"], stride=stride
             )
             module.add_module("maxpool_{}".format(i), maxpool)
 
         elif block["type"] == "route":
-            # Route layer concatenates outputs (across channel dim); add dummy
+            # Route layer concatenates outputs along channel dim; add dummy
             # layer and handle the actual logic in Darknet.forward().
             module.add_module("route_{}".format(i), DummyLayer())
 
@@ -279,9 +279,8 @@ def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
             curr_out_channels = out_channels
 
         elif block["type"] == "shortcut":
-            # Shortcut layer is a residual layer that sums output from previous
-            # layer and a different previous layers; add dummy layer and handle
-            # the actual logic in Darknet.forward().
+            # Shortcut layer sums outputs from previous layers; add dummy
+            # layer and handle the actual logic in Darknet.forward().
             module.add_module("shortcut_{}".format(i), DummyLayer())
 
             if "activation" in block:
@@ -318,8 +317,7 @@ class Darknet(torch.nn.Module):
         """
         Args:
             config_path (str): Path to Darknet .cfg file.
-            device (str): Device (eg, "cpu", "cuda") on which to allocate
-                tensors.
+            device (str): Device (eg, "cpu", "cuda") on which to allocate tensors
         """
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
@@ -333,7 +331,7 @@ class Darknet(torch.nn.Module):
         self.blocks_to_cache = set()
         for i, block in enumerate(self.blocks):
             if block["type"] == "route":
-                # Replace negative values to reflect absolute (positive) block idx.
+                # Replace negative values with absolute block index.
                 for j, block_idx in enumerate(block["layers"]):
                     if block_idx < 0:
                         block["layers"][j] = i + block_idx
@@ -350,7 +348,7 @@ class Darknet(torch.nn.Module):
     def forward(self, x):
         """
         Returns:
-            Dictionary of bbox coordinates/scores and bbox class indices.
+            Dictionary of bbox coordinates/probabilities and bbox class indices.
         """
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
@@ -373,7 +371,7 @@ class Darknet(torch.nn.Module):
             if i in cached_outputs:
                 cached_outputs[i] = x
 
-        # Concatenate predictions from each scale.
+        # Concatenate predictions from each scale (ie, each YOLO layer).
         bbox_xywhs = torch.cat(bbox_list, dim=0)
         max_class_idx = torch.cat(max_class_idx_list)
 
@@ -406,7 +404,7 @@ class Darknet(torch.nn.Module):
             # Index (pointer) to position in weights array.
             p = 0
 
-            for i, (block, module) in enumerate(zip(self.blocks, self.modules_)):
+            for block, module in zip(self.blocks, self.modules_):
                 # Only "convolutional" blocks have weights.
                 if block["type"] == "convolutional":
                     conv = module[0]
