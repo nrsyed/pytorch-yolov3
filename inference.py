@@ -284,7 +284,7 @@ def cxywh_to_tlbr(bbox_xywh):
 
 
 def inference(
-    net, images, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
+    net, images, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3, resize=True
 ):
     """
     Run inference on an image and return the corresponding bbox coordinates,
@@ -366,7 +366,8 @@ def inference(
 
 
 def detect_in_cam(
-    net, cam_id=0, device="cuda", class_names=None, show_fps=False, frames=None
+    net, cam_id=0, device="cuda", prob_thresh=0.05, class_names=None,
+    show_fps=False, frames=None
 ):
     """
     Run and display real-time inference on a webcam stream.
@@ -378,6 +379,7 @@ def detect_in_cam(
         net (torch.nn.Module): Instance of network class.
         cam_id (int): Camera device id.
         device (str): Device for inference (eg, "cpu", "cuda").
+        prob_thresh (float): Detection probability threshold.
         class_names (list): List of all model class names in order.
         show_fps (bool): Whether to display current frames processed per second.
         frames (list): Optional list to populate with frames being displayed;
@@ -402,7 +404,9 @@ def detect_in_cam(
             break
 
         frame = video_getter.frame
-        bbox_tlbr, _, class_idx = inference(net, frame, device=device)[0]
+        bbox_tlbr, _, class_idx = inference(
+            net, frame, device=device, prob_thresh=prob_thresh
+        )[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -422,8 +426,8 @@ def detect_in_cam(
 
 
 def detect_in_video(
-    net, filepath, device="cuda", class_names=None, frames=None,
-    show_video=True
+    net, filepath, device="cuda", prob_thresh=0.05, class_names=None,
+    frames=None, show_video=True
 ):
     """
     Run and optionally display inference on a video file.
@@ -435,6 +439,7 @@ def detect_in_video(
         net (torch.nn.Module): Instance of network class.
         filepath (str): Path to video file.
         device (str): Device for inference (eg, "cpu", "cuda").
+        prob_thresh (float): Detection probability threshold.
         cam_id (int): Camera device id.
         class_names (list): List of all model class names in order.
         frames (list): Optional list to populate with frames being displayed;
@@ -450,7 +455,9 @@ def detect_in_video(
         if not grabbed:
             break
 
-        bbox_tlbr, _, class_idx = inference(net, frame, device=device)[0]
+        bbox_tlbr, _, class_idx = inference(
+            net, frame, device=device, prob_thresh=prob_thresh
+        )[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )

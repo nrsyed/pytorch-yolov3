@@ -69,6 +69,10 @@ if __name__ == "__main__":
             displayed instead of name."
     )
     model_args.add_argument(
+        "-p", "--prob-thresh", type=float, default=0.05, metavar="<prob>",
+        help="Detection probability threshold [default 0.05]"
+    )
+    model_args.add_argument(
         "-w", "--weights", type=pathlib.Path, required=True, metavar="<path>",
         help="[Required] Path to Darknet model weights file."
     )
@@ -117,7 +121,9 @@ if __name__ == "__main__":
 
     if source == "image":
         image = cv2.imread(args["image"])
-        bbox_xywh, _, class_idx = inference.inference(net, image, device=device)[0]
+        bbox_xywh, _, class_idx = inference.inference(
+            net, image, device=device, prob_thresh=args["prob_thresh"]
+        )[0]
         inference.draw_boxes(
             image, bbox_xywh, class_idx=class_idx, class_names=class_names
         )
@@ -138,7 +144,8 @@ if __name__ == "__main__":
             try:
                 inference.detect_in_cam(
                     net, device=device, class_names=class_names,
-                    cam_id=args["cam"], show_fps=args["show_fps"], frames=frames
+                    prob_thresh=args["prob_thresh"], cam_id=args["cam"],
+                    show_fps=args["show_fps"], frames=frames
                 )
             except Exception as e:
                 raise e
@@ -150,7 +157,8 @@ if __name__ == "__main__":
         elif source == "video":
             inference.detect_in_video(
                 net, filepath=args["video"], device=device,
-                class_names=class_names, frames=frames
+                prob_thresh=args["prob_thresh"], class_names=class_names,
+                frames=frames
             )
 
             if args["output"] and frames:
