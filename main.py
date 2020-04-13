@@ -291,7 +291,7 @@ def cxywh_to_tlbr(bbox_xywh):
 
 
 def do_inference(
-    net, image, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
+    net, images, device="cuda", prob_thresh=0.12, nms_iou_thresh=0.3, resize=True
 ):
     """
     Run inference on an image and return the corresponding bbox coordinates,
@@ -299,7 +299,8 @@ def do_inference(
 
     Args:
         net (torch.nn.Module): Instance of network class.
-        image (np.ndarray): Image array.
+        images (List[np.ndarray]): List (batch) of images to process
+            simultaneously.
         device (str): Device for inference (eg, "cpu", "cuda").
         prob_thresh (float): Probability threshold for detections to keep.
             0 <= prob_thresh < 1.
@@ -309,44 +310,66 @@ def do_inference(
             `net_info` attribute/block of `net` (from the Darknet .cfg file).
 
     Returns:
-        bbox_tlbr (np.ndarray): Mx4 array of bbox top left/bottom right coords
-        class_prob (np.ndarray): Array of M predicted class probabilities.
-        class_idx (np.ndarray): Array of M predicted class indices.
+        List of lists (one for each image in the batch) of:
+            bbox_tlbr (np.ndarray): Mx4 array of bbox top left/bottom right coords
+            class_prob (np.ndarray): Array of M predicted class probabilities.
+            class_idx (np.ndarray): Array of M predicted class indices.
     """
-    orig_rows, orig_cols = image.shape[:2]
-    net_info = net.net_info
-    if resize and image.shape[:2] != [net_info["height"], net_info["width"]]:
-        image = cv2.resize(image, (net_info["height"], net_info["width"]))
+    if not isinstance(images, list):
+        images = [images]
 
-    image = np.transpose(np.flip(image, 2), (2, 0, 1)).astype(np.float32) / 255.
-    inp = torch.tensor(image, device=device).unsqueeze(0)
+    orig_image_shapes = [image.shape for image in images]
 
+    # Resize input images to match shape of images on which net was trained.
+    if resize:
+        net_image_shape = (net.net_info["height"], net.net_info["width"])
+        images = [
+            cv2.resize(image, net_image_shape) if image.shape[:2] != net_image_shape
+            else image for image in images
+        ]
+
+    # Stack images along new batch axis, flip channel axis so channels are RGB
+    # instead of BGR, transpose so channel axis comes before row/column axes,
+    # and convert pixel values to FP32. Do this in one step to ensure array
+    # is contiguous before passing to torch tensor constructor.
+    inp = np.transpose(np.flip(np.stack(images), 3), (0, 3, 1, 2)).astype(
+        np.float32) / 255.0
+
+    inp = torch.tensor(inp, device=device)
+    start_t = time.time()
     out = net.forward(inp)
 
-    bbox_xywhs = out["bbox_xywhs"].detach().cpu().numpy()
-    class_idx = out["max_class_idx"].cpu().numpy()
-
-    bbox_xywh = bbox_xywhs[:, :4]
-    class_prob = bbox_xywhs[:, 4]
+    bbox_xywh = out["bbox_xywh"].detach().cpu().numpy()
+    class_prob = out["class_prob"].cpu().numpy()
+    class_idx = out["class_idx"].cpu().numpy()
 
     thresh_mask = class_prob >= prob_thresh
 
-    bbox_xywh = bbox_xywh[thresh_mask, :]
-    class_idx = class_idx[thresh_mask]
-    class_prob = class_prob[thresh_mask]
+    # Perform post-processing on each image in the batch and return results.
+    results = []
+    for i in range(bbox_xywh.shape[0]):
+        image_bbox_xywh = bbox_xywh[i, thresh_mask[i, :], :]
+        image_class_prob = class_prob[i, thresh_mask[i, :]]
+        image_class_idx = class_idx[i, thresh_mask[i, :]]
 
-    bbox_xywh[:, [0, 2]] *= orig_cols
-    bbox_xywh[:, [1, 3]] *= orig_rows
-    bbox_xywh = bbox_xywh.astype(np.int)
+        image_bbox_xywh[:, [0, 2]] *= orig_image_shapes[i][1]
+        image_bbox_xywh[:, [1, 3]] *= orig_image_shapes[i][0]
+        image_bbox_tlbr = cxywh_to_tlbr(image_bbox_xywh.astype(np.int))
 
-    bbox_tlbr = cxywh_to_tlbr(bbox_xywh)
-    idxs_to_keep = non_max_suppression(
-        bbox_tlbr, class_prob, class_idx=class_idx, iou_thresh=nms_iou_thresh
-    )
-    bbox_tlbr = bbox_tlbr[idxs_to_keep, :]
-    class_idx = class_idx[idxs_to_keep]
+        idxs_to_keep = non_max_suppression(
+            image_bbox_tlbr, image_class_prob, class_idx=image_class_idx,
+            iou_thresh=nms_iou_thresh
+        )
 
-    return bbox_tlbr, class_prob, class_idx
+        results.append(
+            [
+                image_bbox_tlbr[idxs_to_keep, :],
+                image_class_prob[idxs_to_keep],
+                image_class_idx[idxs_to_keep]
+            ]
+        )
+
+    return results
 
 
 def detect_in_cam(
@@ -386,7 +409,7 @@ def detect_in_cam(
             break
 
         frame = video_getter.frame
-        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -434,7 +457,7 @@ def detect_in_video(
         if not grabbed:
             break
 
-        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)
+        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -555,8 +578,10 @@ if __name__ == "__main__":
 
     if source == "image":
         image = cv2.imread(args["image"])
-        bbox_tlbr, _, class_idx = do_inference(net, image, device=device)
-        draw_boxes(image, bbox_tlbr, class_idx=class_idx, class_names=class_names)
+        bbox_xywh, _, class_idx = do_inference(net, image, device=device)[0]
+        draw_boxes(
+            image, bbox_xywh, class_idx=class_idx, class_names=class_names
+        )
         if args["output"]:
             cv2.imwrite(args["output"], image)
         cv2.imshow("YOLOv3", image)

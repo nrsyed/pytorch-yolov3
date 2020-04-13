@@ -5,9 +5,6 @@ import torch
 import torch.nn.functional as F
 
 
-DEFAULT_DEVICE="cpu"
-
-
 class DummyLayer(torch.nn.Module):
     def __init__(self):
         """
@@ -20,7 +17,7 @@ class DummyLayer(torch.nn.Module):
 
 class MaxPool2d(torch.nn.MaxPool2d):
     """
-    Monkey patched MaxPool2d class to replicate "same" padding; refer to
+    Monkey-patched MaxPool2d class to replicate "same" padding; refer to
     https://github.com/eriklindernoren/PyTorch-YOLOv3/pull/48/files#diff-f219bfe69e6ed201e4bdfdb371dc0c9bR49
     """
     def forward(self, input_):
@@ -35,7 +32,7 @@ class MaxPool2d(torch.nn.MaxPool2d):
 
 
 class YOLOLayer(torch.nn.Module):
-    def __init__(self, anchors, mask, device=DEFAULT_DEVICE):
+    def __init__(self, anchors, mask, device="cpu"):
         """
         anchors (list): List of bounding box anchors (2-tuples of floats).
         mask (list): Anchor box indices (corresponding to `anchors`) for
@@ -54,20 +51,21 @@ class YOLOLayer(torch.nn.Module):
         probability, and class index.
 
         Returns:
-            bbox_xywhs: Mx5 tensor of M detections, where dim 1 indices
-                correspond to: center x, center y, width, height, class
-                probability (of class with greatest probability).
+            bbox_xywh: NxMx4 tensor of M detections, where dim 2 indices
+                correspond to: center x, center y, width, height.
                 0 <= x, y <= 1 (fractions of image size). w and h are integer
                 values in pixels and should be scaled to net info training
                 image width/height.
-            max_class_idx: M element tensor corresponding to index of class
-                with greatest probability for each detection.
+            class_prob: NxM tensor corresponding to probability of class with
+                greatest probability for each detection.
+            class_idx: NxM tensor corresponding to index of class with greatest
+                probability for each detection.
         """
         # Introspect number of classes from anchors and input shape.
         num_anchors = len(self.anchors)
-        num_samples, num_predictions, h, w = x.shape
+        batch_size, num_predictions, h, w = x.shape
         num_classes = int(num_predictions / num_anchors) - 5
-        x = x.reshape((num_samples, num_anchors, num_classes + 5, h, w))
+        x = x.reshape((batch_size, num_anchors, num_classes + 5, h, w))
 
         # Indices 0-3 corresponds to xywh energies, index 4 corresponds to
         # objectness energy, and 5: correspond to class energies.
@@ -106,23 +104,22 @@ class YOLOLayer(torch.nn.Module):
         obj_score = obj_energy.clone().detach().sigmoid()
         class_score = F.softmax(class_energy.clone().detach(), dim=2)
 
-        max_class_score, max_class_idx = torch.max(class_score, 2, keepdim=True)
-        max_class_score.mul_(obj_score)
+        class_prob, class_idx = torch.max(class_score, 2, keepdim=True)
+        class_prob.mul_(obj_score)
 
-        # Flatten the resulting tensors along anchor box prior and grid cell
-        # dimensions. This makes it easier to combine predictions from this
-        # scale (i.e., this YOLO layer) with predictions from other scales
-        # in Darknet.forward().
-        bbox_xywh = bbox_xywh.squeeze().permute(1, 0, 2, 3).reshape(4, -1).T
-        max_class_score = max_class_score.flatten().unsqueeze(1)
-        max_class_idx = max_class_idx.flatten()
+        # Flatten resulting tensors along anchor box and grid cell dimensions;
+        # this makes it easier to combine predictions across scales from other
+        # YOLO layers in Darknet.forward().
+        #`bbox_xywh` -> (batch_size x num_predictions x 4) tensor, where last
+        # dim corresponds to xywh coordinates of prediction.
+        # `class_prob`, `class_idx` -> (batch_size x num_predictions)
+        # tensors, where dim 1 corresponds to the probability and index,
+        # respectively, of the class with the greatest probability.
+        bbox_xywh = bbox_xywh.permute(0, 1, 3, 4, 2).reshape(batch_size, -1, 4)
+        class_prob = class_prob.reshape(batch_size, -1)
+        class_idx = class_idx.reshape(batch_size, -1)
 
-        # Concatenate bbox coordinates and max class scores such that indices
-        # 0-3 of each bbox correspond to its xywh coordinates and index 4 of
-        # each bbox corresponds to its max class score (probability).
-        bbox_xywhs = torch.cat((bbox_xywh, max_class_score), dim=1)
-
-        return bbox_xywhs, max_class_idx
+        return bbox_xywh, class_prob, class_idx
 
 
 def parse_config(fpath):
@@ -212,7 +209,7 @@ def parse_config(fpath):
     return blocks, net_info
 
 
-def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
+def blocks2modules(blocks, net_info, device="cpu"):
     """
     Translate output of `parse_config()` into pytorch modules.
 
@@ -313,7 +310,7 @@ def blocks2modules(blocks, net_info, device=DEFAULT_DEVICE):
 
 
 class Darknet(torch.nn.Module):
-    def __init__(self, config_fpath, device=DEFAULT_DEVICE):
+    def __init__(self, config_fpath, device="cpu"):
         """
         Args:
             config_path (str): Path to Darknet .cfg file.
@@ -348,43 +345,55 @@ class Darknet(torch.nn.Module):
     def forward(self, x):
         """
         Returns:
-            Dictionary of bbox coordinates/probabilities and bbox class indices.
+            Dict of bbox coordinates, class probabilities and class indices.
         """
+        # Outputs from layers to cache for shortcut/route connections.
         cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
 
-        bbox_list, max_class_idx_list = [], []
+        # Lists of transformed outputs from each YOLO layer to be concatenated.
+        bbox_xywh_list = []
+        class_prob_list = []
+        class_idx_list = []
+
         for i, block in enumerate(self.blocks):
             if block["type"] in ("convolutional", "maxpool", "upsample"):
                 x = self.modules_[i](x)
             elif block["type"] == "route":
+                # Concatenate outputs from layers specified by the "layers"
+                # field of the route block.
                 x = torch.cat(
                     tuple(cached_outputs[idx] for idx in block["layers"]),
                     dim=1
                 )
             elif block["type"] == "shortcut":
+                # Concatenate output from previous layer with the output from
+                # the layer specified by the "from" field of the shortcut block.
                 x = cached_outputs[i-1] + cached_outputs[i+block["from"]]
             elif block["type"] == "yolo":
-                bbox_xywhs, max_class_idx = self.modules_[i](x)
-                bbox_list.append(bbox_xywhs)
-                max_class_idx_list.append(max_class_idx)
+                bbox_xywh, class_prob, class_idx = self.modules_[i](x)
+                bbox_xywh_list.append(bbox_xywh)
+                class_prob_list.append(class_prob)
+                class_idx_list.append(class_idx)
 
             if i in cached_outputs:
                 cached_outputs[i] = x
 
         # Concatenate predictions from each scale (ie, each YOLO layer).
-        bbox_xywhs = torch.cat(bbox_list, dim=0)
-        max_class_idx = torch.cat(max_class_idx_list)
+        bbox_xywh = torch.cat(bbox_xywh_list, dim=1)
+        class_prob = torch.cat(class_prob_list, dim=1)
+        class_idx = torch.cat(class_idx_list, dim=1)
 
         # Scale bbox w and h based on training width/height from net info.
         train_wh = torch.tensor(
             [self.net_info["width"], self.net_info["height"]],
             device=self.device
         )
-        bbox_xywhs[:, 2:4].div_(train_wh)
+        bbox_xywh[:, :, 2:4].div_(train_wh)
 
         return {
-            "bbox_xywhs": bbox_xywhs,
-            "max_class_idx": max_class_idx,
+            "bbox_xywh": bbox_xywh,
+            "class_prob": class_prob,
+            "class_idx": class_idx,
         }
 
 
