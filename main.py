@@ -373,7 +373,8 @@ def do_inference(
 
 
 def detect_in_cam(
-    net, cam_id=0, device="cuda", class_names=None, show_fps=False, frames=None
+    net, cam_id=0, device="cuda", class_names=None, show_fps=False,
+    smooth_frames=0, frames=None
 ):
     """
     Run and display real-time inference on a webcam stream.
@@ -387,6 +388,9 @@ def detect_in_cam(
         device (str): Device for inference (eg, "cpu", "cuda").
         class_names (list): List of all model class names in order.
         show_fps (bool): Whether to display current frames processed per second.
+        smooth_frames (int): Number of previous frames to smooth over; if >1,
+            the output of the last `smooth_frames` frames is concatenated and
+            NMS is performed on the concatenated frames.
         frames (list): Optional list to populate with frames being displayed;
             can be used to write or further process frames after this function
             completes. Because mutables (like lists) are passed by reference
@@ -399,7 +403,11 @@ def detect_in_cam(
     num_fps_frames = 30
     previous_fps = deque(maxlen=num_fps_frames)
 
-    num_frames = 0
+    num_smooth_frames = 6
+    previous_bbox = deque(maxlen=num_smooth_frames)
+    previous_class_idx = deque(maxlen=num_smooth_frames)
+    previous_class_prob = deque(maxlen=num_smooth_frames)
+
     while True:
         loop_start_time = time.time()
 
@@ -409,7 +417,25 @@ def detect_in_cam(
             break
 
         frame = video_getter.frame
-        bbox_tlbr, _, class_idx = do_inference(net, frame, device=device)[0]
+        bbox_tlbr, class_prob, class_idx = do_inference(
+            net, frame, device=device, prob_thresh=0.2)[0]
+
+        if smooth_frames > 1:
+            # Concatenate previous frames and perform NMS (again!).
+            previous_bbox.append(bbox_tlbr)
+            previous_class_idx.append(class_idx)
+            previous_class_prob.append(class_prob)
+
+            bbox_tlbr = np.concatenate(previous_bbox)
+            class_idx = np.concatenate(previous_class_idx)
+            class_prob = np.concatenate(previous_class_prob)
+
+
+            idxs_to_keep = non_max_suppression(
+                bbox_tlbr, class_prob, iou_thresh=0.2)
+            bbox_tlbr = bbox_tlbr[idxs_to_keep]
+            class_idx = class_idx[idxs_to_keep]
+
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
@@ -545,6 +571,10 @@ if __name__ == "__main__":
         "--show-fps", action="store_true",
         help="Display frames processed per second (for --cam input)."
     )
+    other_args.add_argument(
+        "--smooth-frames", type=int, default=0,
+        help="Number of previous frames to smooth and perform NMS over for --cam"
+    )
 
     args = vars(parser.parse_args())
 
@@ -599,7 +629,8 @@ if __name__ == "__main__":
             try:
                 detect_in_cam(
                     net, device=device, class_names=class_names,
-                    cam_id=args["cam"], show_fps=args["show_fps"], frames=frames
+                    cam_id=args["cam"], show_fps=args["show_fps"],
+                    smooth_frames=args["smooth_frames"], frames=frames
                 )
             except Exception as e:
                 raise e
