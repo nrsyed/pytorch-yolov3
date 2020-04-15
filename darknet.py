@@ -366,8 +366,8 @@ class Darknet(torch.nn.Module):
                     dim=1
                 )
             elif block["type"] == "shortcut":
-                # Concatenate output from previous layer with the output from
-                # the layer specified by the "from" field of the shortcut block.
+                # Add output from previous layer with the output from the layer
+                # specified by the "from" field of the shortcut block.
                 x = cached_outputs[i-1] + cached_outputs[i+block["from"]]
             elif block["type"] == "yolo":
                 bbox_xywh, class_prob, class_idx = self.modules_[i](x)
