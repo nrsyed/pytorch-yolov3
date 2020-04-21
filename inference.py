@@ -29,7 +29,7 @@ class VideoGetter():
         Method called in a thread to continually read frames from `self.cap`.
         This way, a frame is always ready to be read. Frames are not queued;
         if a frame is not read before `get()` reads a new frame, previous
-        frame is overwritten and cannot be obtained again.
+        frame is overwritten.
         """
         while not self.stopped:
             if not self.grabbed:
@@ -100,8 +100,7 @@ def draw_boxes(
 ):
     """
     Draw bboxes (and class names or indices for each bbox) on an image.
-    Bboxes are drawn in-place on the original image; this function does not
-    return a new image.
+    Bboxes are drawn in-place on the original image.
 
     If `class_prob` is provided, the prediction probability for each bbox
     will be displayed along with the bbox. If `class_idx` is provided, the
@@ -366,8 +365,8 @@ def inference(
 
 
 def detect_in_cam(
-    net, cam_id=0, device="cuda", prob_thresh=0.05, class_names=None,
-    show_fps=False, frames=None
+    net, cam_id=0, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    class_names=None, show_fps=False, frames=None
 ):
     """
     Run and display real-time inference on a webcam stream.
@@ -380,6 +379,7 @@ def detect_in_cam(
         cam_id (int): Camera device id.
         device (str): Device for inference (eg, "cpu", "cuda").
         prob_thresh (float): Detection probability threshold.
+        nms_iou_thresh (float): NMS IOU threshold.
         class_names (list): List of all model class names in order.
         show_fps (bool): Whether to display current frames processed per second.
         frames (list): Optional list to populate with frames being displayed;
@@ -405,7 +405,8 @@ def detect_in_cam(
 
         frame = video_getter.frame
         bbox_tlbr, _, class_idx = inference(
-            net, frame, device=device, prob_thresh=prob_thresh
+            net, frame, device=device, prob_thresh=prob_thresh,
+            nms_iou_thresh=nms_iou_thresh
         )[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
@@ -426,8 +427,8 @@ def detect_in_cam(
 
 
 def detect_in_video(
-    net, filepath, device="cuda", prob_thresh=0.05, class_names=None,
-    frames=None, show_video=True
+    net, filepath, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    class_names=None, frames=None, show_video=True
 ):
     """
     Run and optionally display inference on a video file.
@@ -440,6 +441,7 @@ def detect_in_video(
         filepath (str): Path to video file.
         device (str): Device for inference (eg, "cpu", "cuda").
         prob_thresh (float): Detection probability threshold.
+        nms_iou_thresh (float): NMS IOU threshold.
         cam_id (int): Camera device id.
         class_names (list): List of all model class names in order.
         frames (list): Optional list to populate with frames being displayed;
@@ -456,13 +458,14 @@ def detect_in_video(
             break
 
         bbox_tlbr, _, class_idx = inference(
-            net, frame, device=device, prob_thresh=prob_thresh
+            net, frame, device=device, prob_thresh=prob_thresh,
+            nms_iou_thresh=nms_iou_thresh
         )[0]
         draw_boxes(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
 
-        if args["output"] is not None:
+        if frames is not None:
             frames.append(frame)
 
         if show_video:
