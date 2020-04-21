@@ -22,7 +22,26 @@ for more information.
 
 ## Usage
 
-Run `python test.py --help` for usage information.
+Run `python main.py --help` for a complete list of options. Refer to the
+[Examples](#examples) section below for representative examples.
+
+### Required arguments
+
+At least one of the following input source arguments is required:
+
++ `-C`/`--cam` `[cam_id]`: Webcam device ID or path to video stream
+	(e.g., RTSP URL); defaults to `0` if none provided.
+
++ `-I`/`--image` `<path>`: Path to an image file.
+
++ `-V`/`--video` `<path>`: Path to a video file.
+
+
+The following arguments are always required:
+
++ `-c`/`--config` `<path>`: Path to Darknet model .cfg file.
+
++ `-w`/`--weights` `<path>`: Path to Darknet model .weights file.
 
 ## Examples
 &#35; TODO
