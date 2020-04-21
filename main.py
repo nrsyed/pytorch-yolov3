@@ -40,7 +40,7 @@ if __name__ == "__main__":
     source_args = source_.add_mutually_exclusive_group(required=True)
     source_args.add_argument(
         "-C", "--cam", metavar="cam_id", nargs="?", const=0,
-        help="Camera or video capture device ID or path. [Default: 0]"
+        help="Camera or video capture device ID or path. [Default 0]"
     )
     source_args.add_argument(
         "-I", "--image", type=pathlib.Path, metavar="<path>",
@@ -58,7 +58,11 @@ if __name__ == "__main__":
     )
     model_args.add_argument(
         "-d", "--device", type=str, default="cuda", metavar="<device>",
-        help="Device for inference ('cpu', 'cuda'). [Default: 'cuda']"
+        help="Device for inference ('cpu', 'cuda'). [Default 'cuda']"
+    )
+    model_args.add_argument(
+        "-i", "--iou-thresh", type=float, default=0.3, metavar="<iou>",
+        help="Non-maximum suppression IOU threshold. [Default 0.3]"
     )
     model_args.add_argument(
         "-n", "--class-names", type=pathlib.Path, metavar="<path>",
@@ -67,7 +71,7 @@ if __name__ == "__main__":
     )
     model_args.add_argument(
         "-p", "--prob-thresh", type=float, default=0.05, metavar="<prob>",
-        help="Detection probability threshold [default 0.05]"
+        help="Detection probability threshold. [Default 0.05]"
     )
     model_args.add_argument(
         "-w", "--weights", type=pathlib.Path, required=True, metavar="<path>",
@@ -124,7 +128,8 @@ if __name__ == "__main__":
     if source == "image":
         image = cv2.imread(args["image"])
         bbox_xywh, _, class_idx = inference.inference(
-            net, image, device=device, prob_thresh=args["prob_thresh"]
+            net, image, device=device, prob_thresh=args["prob_thresh"],
+            nms_iou_thresh=args["iou_thresh"]
         )[0]
         inference.draw_boxes(
             image, bbox_xywh, class_idx=class_idx, class_names=class_names
@@ -141,13 +146,15 @@ if __name__ == "__main__":
         if source == "cam":
             start_time = time.time()
 
-            # Wrap in try/except block so that writing output video is written
+            # Wrap in try/except block so that output video is written
             # even if an error occurs while streaming webcam input.
             try:
                 inference.detect_in_cam(
-                    net, device=device, class_names=class_names,
-                    prob_thresh=args["prob_thresh"], cam_id=args["cam"],
-                    show_fps=args["show_fps"], frames=frames
+                    net, cam_id=args["cam"], device=device,
+                    prob_thresh=args["prob_thresh"],
+                    nms_iou_thresh=args["iou_thresh"],
+                    class_names=class_names, show_fps=args["show_fps"],
+                    frames=frames
                 )
             except Exception as e:
                 raise e
@@ -159,10 +166,10 @@ if __name__ == "__main__":
         elif source == "video":
             inference.detect_in_video(
                 net, filepath=args["video"], device=device,
-                prob_thresh=args["prob_thresh"], class_names=class_names,
+                prob_thresh=args["prob_thresh"],
+                nms_iou_thresh=args["iou_thresh"], class_names=class_names,
                 frames=frames
             )
-
             if args["output"] and frames:
                 # Get input video FPS and write output video at same FPS.
                 cap = cv2.VideoCapture(args["video"])
