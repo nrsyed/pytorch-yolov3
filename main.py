@@ -93,7 +93,9 @@ if __name__ == "__main__":
     args = vars(parser.parse_args())
 
     # Expand pathlib Paths and convert to string.
-    path_args = ("class_names", "config", "weights", "image", "video", "output")
+    path_args = (
+        "class_names", "config", "weights", "image", "video", "output"
+    )
     for path_arg in path_args:
         if args[path_arg] is not None:
             args[path_arg] = str(args[path_arg].expanduser().absolute())

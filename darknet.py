@@ -1,5 +1,3 @@
-import re
-
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -110,7 +108,7 @@ class YOLOLayer(torch.nn.Module):
         # Flatten resulting tensors along anchor box and grid cell dimensions;
         # this makes it easier to combine predictions across scales from other
         # YOLO layers in Darknet.forward().
-        #`bbox_xywh` -> (batch_size x num_predictions x 4) tensor, where last
+        # `bbox_xywh` -> (batch_size x num_predictions x 4) tensor, where last
         # dim corresponds to xywh coordinates of prediction.
         # `class_prob`, `class_idx` -> (batch_size x num_predictions)
         # tensors, where dim 1 corresponds to the probability and index,
@@ -217,7 +215,7 @@ def blocks2modules(blocks, net_info, device="cpu"):
         torch.nn.ModuleList
     """
     modules = torch.nn.ModuleList()
-    
+
     # Track number of channels (filters) in the output of each layer; this
     # is necessary to determine layer input/output shapes for various layers.
     curr_out_channels = None
@@ -256,7 +254,7 @@ def blocks2modules(blocks, net_info, device="cpu"):
 
             # Update the number of current (output) channels.
             curr_out_channels = out_channels
-        
+
         elif block["type"] == "maxpool":
             stride = block["stride"]
             maxpool = MaxPool2d(
@@ -314,7 +312,7 @@ class Darknet(torch.nn.Module):
         """
         Args:
             config_path (str): Path to Darknet .cfg file.
-            device (str): Device (eg, "cpu", "cuda") on which to allocate tensors
+            device (str): Where to allocate tensors (e.g., "cpu", "cuda", etc.)
         """
         super().__init__()
         self.blocks, self.net_info = parse_config(config_fpath)
@@ -348,7 +346,9 @@ class Darknet(torch.nn.Module):
             Dict of bbox coordinates, class probabilities and class indices.
         """
         # Outputs from layers to cache for shortcut/route connections.
-        cached_outputs = {block_idx: None for block_idx in self.blocks_to_cache}
+        cached_outputs = {
+            block_idx: None for block_idx in self.blocks_to_cache
+        }
 
         # Lists of transformed outputs from each YOLO layer to be concatenated.
         bbox_xywh_list = []
@@ -396,7 +396,6 @@ class Darknet(torch.nn.Module):
             "class_idx": class_idx,
         }
 
-
     def load_weights(self, weights_path):
         """
         Refer to
@@ -426,36 +425,44 @@ class Darknet(torch.nn.Module):
                         bn = module[1]
                         bn_len = bn.bias.numel()
 
-                        bn_biases = torch.from_numpy(weights[p:p + bn_len])
+                        bn_biases = torch.from_numpy(weights[p:p+bn_len])
                         bn.bias.data.copy_(bn_biases.view_as(bn.bias.data))
                         p += bn_len
 
-                        bn_weights = torch.from_numpy(weights[p:p + bn_len])
-                        bn.weight.data.copy_(bn_weights.view_as(bn.weight.data))
+                        bn_weights = torch.from_numpy(weights[p:p+bn_len])
+                        bn.weight.data.copy_(
+                            bn_weights.view_as(bn.weight.data)
+                        )
                         p += bn_len
 
-                        bn_running_mean = torch.from_numpy(weights[p:p + bn_len])
+                        bn_running_mean = torch.from_numpy(weights[p:p+bn_len])
                         bn.running_mean.copy_(
                             bn_running_mean.view_as(bn.running_mean)
                         )
                         p += bn_len
 
-                        bn_running_var = torch.from_numpy(weights[p:p + bn_len])
+                        bn_running_var = torch.from_numpy(weights[p:p+bn_len])
                         bn.running_var.copy_(
                             bn_running_var.view_as(bn.running_var)
                         )
                         p += bn_len
 
                     else:
-                        # Convolutional blocks without batch norm have weights
-                        # stored in the following order: conv biases, conv weights.
+                        # Convolutional blocks without batch norm store weights
+                        # in the following order: conv biases, conv weights.
                         num_conv_biases = conv.bias.numel()
-                        conv_biases = torch.from_numpy(weights[p:p + num_conv_biases])
-                        conv.bias.data.copy_(conv_biases.view_as(conv.bias.data))
+                        conv_biases = torch.from_numpy(
+                            weights[p:p+num_conv_biases]
+                        )
+                        conv.bias.data.copy_(
+                            conv_biases.view_as(conv.bias.data)
+                        )
                         p += num_conv_biases
 
                     num_weights = conv.weight.numel()
-                    conv_weights = torch.from_numpy(weights[p:p + num_weights])
-                    conv.weight.data.copy_(conv_weights.view_as(conv.weight.data))
+                    conv_weights = torch.from_numpy(weights[p:p+num_weights])
+                    conv.weight.data.copy_(
+                        conv_weights.view_as(conv.weight.data)
+                    )
                     p += num_weights
         return self

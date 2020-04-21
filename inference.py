@@ -1,12 +1,12 @@
 from collections import deque
 import colorsys
-import datetime
 import threading
 import time
 
 import cv2
 import numpy as np
 import torch
+
 
 class VideoGetter():
     def __init__(self, src=0):
@@ -154,8 +154,8 @@ def draw_boxes(
                 color=(20, 20, 20), thickness=cv2.FILLED
             )
             cv2.putText(
-                img, bbox_text, (tl_x + 1, tl_y + 13), cv2.FONT_HERSHEY_SIMPLEX,
-                0.45, (255, 255, 255), thickness=1
+                img, bbox_text, (tl_x + 1, tl_y + 13),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), thickness=1
             )
 
 
@@ -181,8 +181,8 @@ def _non_max_suppression(bbox_tlbr, prob, iou_thresh=0.3):
 
     # Compute area of each bbox.
     area = (
-        ((bbox_tlbr[:,2] - bbox_tlbr[:,0]) + 1)
-        * ((bbox_tlbr[:,3] - bbox_tlbr[:,1]) + 1)
+        ((bbox_tlbr[:, 2] - bbox_tlbr[:, 0]) + 1)
+        * ((bbox_tlbr[:, 3] - bbox_tlbr[:, 1]) + 1)
     )
 
     # Sort detections by probability (largest to smallest).
@@ -259,7 +259,9 @@ def non_max_suppression(bbox_tlbr, class_prob, class_idx=None, iou_thresh=0.3):
             curr_class_idxs_to_keep = _non_max_suppression(
                 curr_class_bbox, curr_class_prob, iou_thresh
             )
-            idxs_to_keep.extend(curr_class_mask[curr_class_idxs_to_keep].tolist())
+            idxs_to_keep.extend(
+                curr_class_mask[curr_class_idxs_to_keep].tolist()
+            )
     else:
         idxs_to_keep = _non_max_suppression(bbox_tlbr, class_prob, iou_thresh)
     return idxs_to_keep
@@ -283,7 +285,8 @@ def cxywh_to_tlbr(bbox_xywh):
 
 
 def inference(
-    net, images, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3, resize=True
+    net, images, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    resize=True
 ):
     """
     Run inference on an image and return the corresponding bbox coordinates,
@@ -303,7 +306,8 @@ def inference(
 
     Returns:
         List of lists (one for each image in the batch) of:
-            bbox_tlbr (np.ndarray): Mx4 array of bbox top left/bottom right coords
+            bbox_tlbr (np.ndarray): Mx4 array of bbox top left/bottom right
+                coords.
             class_prob (np.ndarray): Array of M predicted class probabilities.
             class_idx (np.ndarray): Array of M predicted class indices.
     """
@@ -316,7 +320,8 @@ def inference(
     if resize:
         net_image_shape = (net.net_info["height"], net.net_info["width"])
         images = [
-            cv2.resize(image, net_image_shape) if image.shape[:2] != net_image_shape
+            cv2.resize(image, net_image_shape)
+            if image.shape[:2] != net_image_shape
             else image for image in images
         ]
 
@@ -328,7 +333,6 @@ def inference(
         np.float32) / 255.0
 
     inp = torch.tensor(inp, device=device)
-    start_t = time.time()
     out = net.forward(inp)
 
     bbox_xywh = out["bbox_xywh"].detach().cpu().numpy()
@@ -381,7 +385,7 @@ def detect_in_cam(
         prob_thresh (float): Detection probability threshold.
         nms_iou_thresh (float): NMS IOU threshold.
         class_names (list): List of all model class names in order.
-        show_fps (bool): Whether to display current frames processed per second.
+        show_fps (bool): Display current frames processed per second.
         frames (list): Optional list to populate with frames being displayed;
             can be used to write or further process frames after this function
             completes. Because mutables (like lists) are passed by reference
@@ -394,7 +398,6 @@ def detect_in_cam(
     num_fps_frames = 30
     previous_fps = deque(maxlen=num_fps_frames)
 
-    num_frames = 0
     while True:
         loop_start_time = time.time()
 
@@ -448,7 +451,7 @@ def detect_in_video(
             can be used to write or further process frames after this function
             completes. Because mutables (like lists) are passed by reference
             and are modified in-place, this function has no return value.
-        show_video (bool): Whether to display processed video during processing.
+        show_video (bool): Whether to display output while processing.
     """
     cap = cv2.VideoCapture(filepath)
 
