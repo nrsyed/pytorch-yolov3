@@ -5,12 +5,9 @@ import time
 
 import cv2
 import torch
+
 from darknet import Darknet
-
 import inference
-
-
-# TODO: allow str/file/path pointer for webcam inference.
 
 
 def write_mp4(frames, fps, filepath):
@@ -42,8 +39,8 @@ if __name__ == "__main__":
     source_ = parser.add_argument_group(title="input source [required]")
     source_args = source_.add_mutually_exclusive_group(required=True)
     source_args.add_argument(
-        "-C", "--cam", type=int, metavar="cam_id", nargs="?", const=0,
-        help="Camera or video capture device ID. [Default: 0]"
+        "-C", "--cam", metavar="cam_id", nargs="?", const=0,
+        help="Camera or video capture device ID or path. [Default: 0]"
     )
     source_args.add_argument(
         "-I", "--image", type=pathlib.Path, metavar="<path>",
@@ -91,6 +88,7 @@ if __name__ == "__main__":
 
     args = vars(parser.parse_args())
 
+    # Expand pathlib Paths and convert to string.
     path_args = ("class_names", "config", "weights", "image", "video", "output")
     for path_arg in path_args:
         if args[path_arg] is not None:
@@ -118,6 +116,10 @@ if __name__ == "__main__":
         source = "video"
     else:
         source = "cam"
+        # If --cam argument is str representation of an int, interpret it as
+        # an int device ID. Else interpret as a path to a video capture stream.
+        if isinstance(args["cam"], str) and args["cam"].isdigit():
+            args["cam"] = int(args["cam"])
 
     if source == "image":
         image = cv2.imread(args["image"])
