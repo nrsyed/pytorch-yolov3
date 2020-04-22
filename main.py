@@ -140,11 +140,16 @@ if __name__ == "__main__":
             images.append(cv2.imread(os.path.join(image_dir, fname)))
 
         # TODO: batch images
+        results = []
         for image in images:
-            bbox_xywh, _, class_idx = inference.inference(
-                net, image, device=device, prob_thresh=args["prob_thresh"],
-                nms_iou_thresh=args["iou_thresh"]
-            )[0]
+            results.extend(
+                inference.inference(
+                    net, image, device=device, prob_thresh=args["prob_thresh"],
+                    nms_iou_thresh=args["iou_thresh"]
+                )
+            )
+
+        for image, (bbox_xywh, _, class_idx) in zip(images, results):
             inference.draw_boxes(
                 image, bbox_xywh, class_idx=class_idx, class_names=class_names
             )
