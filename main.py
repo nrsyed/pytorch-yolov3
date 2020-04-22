@@ -44,7 +44,7 @@ if __name__ == "__main__":
     )
     source_args.add_argument(
         "-I", "--image", type=pathlib.Path, metavar="<path>",
-        help="Path to image file."
+        help="Path to image file or directory of images."
     )
     source_args.add_argument(
         "-V", "--video", type=pathlib.Path, metavar="<path>",
@@ -81,9 +81,9 @@ if __name__ == "__main__":
     other_args = parser.add_argument_group(title="Output/display options")
     other_args.add_argument(
         "-o", "--output", type=pathlib.Path, metavar="<path>",
-        help="Path for writing output image/video file. --cam and --video \
-            input source options only support .mp4 output filetype. \
-            If --video input source selected, output FPS matches input FPS."
+        help="Path for writing output video file. Only .mp4 filetype \
+            currently supported. If --video input source selected, output \
+            FPS matches input FPS."
     )
     other_args.add_argument(
         "--show-fps", action="store_true",
@@ -128,18 +128,28 @@ if __name__ == "__main__":
             args["cam"] = int(args["cam"])
 
     if source == "image":
-        image = cv2.imread(args["image"])
-        bbox_xywh, _, class_idx = inference.inference(
-            net, image, device=device, prob_thresh=args["prob_thresh"],
-            nms_iou_thresh=args["iou_thresh"]
-        )[0]
-        inference.draw_boxes(
-            image, bbox_xywh, class_idx=class_idx, class_names=class_names
-        )
-        if args["output"]:
-            cv2.imwrite(args["output"], image)
-        cv2.imshow("YOLOv3", image)
-        cv2.waitKey(0)
+        if os.path.isdir(args["image"]):
+            image_dir = args["image"]
+            fnames = os.listdir(image_dir)
+        else:
+            image_dir, fname = os.path.split(args["image"])
+            fnames = [fname]
+
+        images = []
+        for fname in fnames:
+            images.append(cv2.imread(os.path.join(image_dir, fname)))
+
+        # TODO: batch images
+        for image in images:
+            bbox_xywh, _, class_idx = inference.inference(
+                net, image, device=device, prob_thresh=args["prob_thresh"],
+                nms_iou_thresh=args["iou_thresh"]
+            )[0]
+            inference.draw_boxes(
+                image, bbox_xywh, class_idx=class_idx, class_names=class_names
+            )
+            cv2.imshow("YOLOv3", image)
+            cv2.waitKey(0)
     else:
         frames = None
         if args["output"]:

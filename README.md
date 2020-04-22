@@ -24,7 +24,7 @@ Run `python main.py --help` for a complete list of options. Refer to the
 
 ### Required arguments
 
-At least one of the following input source arguments is required:
+One of the following input source arguments is required:
 
 + `-C`/`--cam` `[cam_id]`: Webcam device ID or path to video stream
 	(e.g., RTSP URL); defaults to `0` if none provided.
