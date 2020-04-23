@@ -370,7 +370,17 @@ def inference(
 
 def to_coco(image_filenames, inference_output, class_names):
     """
-    TODO
+    Convert output from `inference()` to a COCO dataset.
+
+    Args:
+        image_filenames (List[str]): list of image filenames corresponding to
+            each element of `inference_output`.
+        inference_output (list): List of (bbox_xywh, class_prob, class_idx)
+            tuples for each image processed by `inference()`.
+        class_names (List[str]): List of class names.
+
+    Returns:
+        Dict representing a COCO object detection dataset.
     """
     categories = []
     for i, class_name in enumerate(class_names):
