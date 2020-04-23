@@ -21,6 +21,7 @@ def test_yolov3(model, image_dim, batch_size):
     weights_path = os.path.join(model_dir, model + ".weights")
     net = Darknet(config_path, device="cpu")
     net.load_weights(weights_path)
+    net.eval()
 
     x = torch.rand(batch_size, 3, image_dim, image_dim)
-    y = net.forward(x)
+    net.forward(x)
