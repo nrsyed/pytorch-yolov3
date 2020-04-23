@@ -48,7 +48,13 @@ def test_inference():
         fpath = os.path.join(image_dir, fname)
         images.append(cv2.imread(fpath))
 
-    results = inference.inference(net, images, device="cpu", prob_thresh=0.2)
+    # Accumulate images instead of batching; helps run on systems (including
+    # Travis CI) with lower amounts of RAM.
+    results = []
+    for image in images:
+        results.extend(
+            inference.inference(net, image, device="cpu", prob_thresh=0.2)
+        )
 
     with open("models/coco.names", "r") as f:
         class_names = [line.strip() for line in f.readlines()]
