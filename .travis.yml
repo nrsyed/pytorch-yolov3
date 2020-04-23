@@ -1,0 +1,23 @@
+before_install: |
+  base_url="https://pjreddie.com/media/files"
+  for model in yolov3 yolov3-tiny yolov3-spp; do
+    if ! [ -f "models/$model.weights" ]; then
+      wget -P models/ "$base_url/$model.weights"
+    fi
+  done
+
+language: python
+python:
+  - "3.6"
+  - "3.7"
+  - "3.8"
+install:
+  - pip install -r requirements.txt
+  - pip install -r test_requirements.txt
+script:
+  - pytest
+  - flake8 .
+
+cache:
+  directories:
+    - models

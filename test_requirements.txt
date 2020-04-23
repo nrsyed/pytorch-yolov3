@@ -1,0 +1,6 @@
+flake8
+
+# Install pycocotools from git repo since PyPI package not up to date.
+git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI
+
+pytest
