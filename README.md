@@ -1,6 +1,6 @@
 ## Installation
 
-Python &ge; required. Install the requirements and download weight files to
+Python &ge; 3.6 required. Install the requirements and download weight files to
 the `models` directory by running:
 
 ```
