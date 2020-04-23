@@ -1,5 +1,9 @@
 from collections import defaultdict
+import colorsys
 import json
+import os
+
+import numpy as np
 
 
 def load_coco_dataset(path):
@@ -87,7 +91,124 @@ def filter_dataset(
     return filtered_dataset
 
 
+def match_ids(dataset, reference_dataset):
+    """
+    Update category ids and image ids in `dataset` to match those
+    in `reference_dataset` (based on category names and image filenames).
+    """
+    cat_name_to_old_id = dict()
+    for cat in dataset["categories"]:
+        cat_name_to_old_id[cat["name"]] = cat["id"]
+
+    old_cat_id_to_new_id = dict()
+    for cat in reference_dataset["categories"]:
+        old_id = cat_name_to_old_id[cat["name"]]
+        new_id = cat["id"]
+        old_cat_id_to_new_id[old_id] = new_id
+
+    image_fname_to_old_id = dict()
+    for image in dataset["images"]:
+        image_fname_to_old_id[image["file_name"]] = image["id"]
+
+    old_image_id_to_new_id = dict()
+    for image in reference_dataset["images"]:
+        old_id = image_fname_to_old_id[image["file_name"]]
+        new_id = image["id"]
+        old_image_id_to_new_id[old_id] = new_id
+
+    # Mapping of reference dataset image ids to images.
+    ref_image_id_to_image = {
+        image["id"]: image for image in reference_dataset["images"]
+    }
+
+    for image in dataset["images"]:
+        new_id = old_image_id_to_new_id[image["id"]]
+        image["id"] = new_id
+        image["height"] = ref_image_id_to_image[new_id]["height"]
+        image["width"] = ref_image_id_to_image[new_id]["width"]
+
+    for ann in dataset["annotations"]:
+        ann["category_id"] = old_cat_id_to_new_id[ann["category_id"]]
+        ann["image_id"] = old_image_id_to_new_id[ann["image_id"]]
+
+    dataset["categories"] = reference_dataset["categories"]
+
+
+def unique_colors(num_colors):
+    for H in np.linspace(0, 1, num_colors, endpoint=False):
+        rgb = colorsys.hsv_to_rgb(H, 1.0, 1.0)
+        bgr = (int(255 * rgb[2]), int(255 * rgb[1]), int(255 * rgb[0]))
+        yield bgr
+
+
+def draw_coco(dataset, image_dir):
+    """
+    TODO
+    """
+    import cv2
+
+    image_id_to_annotations = defaultdict(list)
+    for ann in dataset["annotations"]:
+        image_id_to_annotations[ann["image_id"]].append(ann)
+
+    cat_id_to_name = {cat["id"]: cat["name"] for cat in dataset["categories"]}
+    cat_id_to_idx = {
+        cat["id"]: i for i, cat in enumerate(dataset["categories"])
+    }
+    colors = list(unique_colors(len(dataset["categories"])))
+
+    for image in sorted(dataset["images"], key=lambda x: x["id"]):
+        img = cv2.imread(os.path.join(image_dir, image["file_name"]))
+
+        annotations = image_id_to_annotations[image["id"]]
+        for ann in annotations:
+            tl_x, tl_y, w, h = [int(coord) for coord in ann["bbox"]]
+            br_x = tl_x + w
+            br_y = tl_y + h
+            cat_id = ann["category_id"]
+            cat_name = cat_id_to_name[cat_id]
+            color = colors[cat_id_to_idx[cat_id]]
+
+            cv2.rectangle(
+                img, (tl_x, tl_y), (br_x, br_y), color=color, thickness=2
+            )
+
+            cv2.rectangle(
+                img, (tl_x + 1, tl_y + 1),
+                (tl_x + int(8 * len(cat_name)), tl_y + 18),
+                color=(20, 20, 20), thickness=cv2.FILLED
+            )
+            cv2.putText(
+                img, cat_name, (tl_x + 1, tl_y + 13),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), thickness=1
+            )
+
+        cv2.imshow("bboxes", img)
+        cv2.waitKey(0)
+
+
 if __name__ == "__main__":
-    ds = load_coco_dataset("annotations/instances_val2017.json")
-    ds = filter_dataset(ds, min_cats=6, max_anns=10, min_supercats=6)
-    urls = [image["coco_url"] for image in ds["images"]]
+    """
+    dataset = load_coco_dataset("annotations/instances_val2017.json")
+    dataset = filter_dataset(dataset, min_cats=6, max_anns=10, min_supercats=6)
+    urls = [image["coco_url"] for image in dataset["images"]]
+
+    dst_dir = os.path.abspath("../sample_dataset")
+    dst_img_dir = os.path.join(dst_dir, "images")
+    if not os.path.exists(dst_img_dir):
+        os.makedirs(dst_img_dir, exist_ok=True)
+
+    for url in urls:
+        req = requests.get(url)
+        image_fname = os.path.split(url)[1]
+        image_fpath = os.path.join(dst_img_dir, image_fname)
+
+        if not os.path.exists(image_fpath):
+            with open(image_fpath, "wb") as f:
+                f.write(req.content)
+
+    dataset_fpath = os.path.join(dst_dir, "sample.json")
+    with open(dataset_fpath, "w") as f:
+        json.dump(dataset, f, indent=2)
+    """
+    pass
