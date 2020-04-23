@@ -17,6 +17,7 @@ install:
   - pip install -r test_requirements.txt
 script:
   - pytest
+  - flake8 .
 
 cache:
   directories:
