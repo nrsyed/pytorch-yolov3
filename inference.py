@@ -88,7 +88,6 @@ def unique_colors(num_colors):
     Yields:
         3-tuple of 8-bit BGR values.
     """
-
     for H in np.linspace(0, 1, num_colors, endpoint=False):
         rgb = colorsys.hsv_to_rgb(H, 1.0, 1.0)
         bgr = (int(255 * rgb[2]), int(255 * rgb[1]), int(255 * rgb[0]))
@@ -289,7 +288,7 @@ def inference(
     resize=True
 ):
     """
-    Run inference on an image and return the corresponding bbox coordinates,
+    Run inference on image(s) and return the corresponding bbox coordinates,
     bbox class probabilities, and bbox class indices.
 
     Args:
@@ -301,8 +300,9 @@ def inference(
             0 <= prob_thresh < 1.
         nms_iou_thresh (float): Intersection over union (IOU) threshold for
             non-maximum suppression (NMS). Per-class NMS is performed.
-        resize (bool): If True, resize `image` to dimensions given by the
-            `net_info` attribute/block of `net` (from the Darknet .cfg file).
+        resize (bool): If True, resize image(s) to dimensions given by the
+            `net_info` attribute/block of `net` (from the Darknet .cfg file)
+            before pushing through network.
 
     Returns:
         List of lists (one for each image in the batch) of:
@@ -366,6 +366,60 @@ def inference(
         )
 
     return results
+
+
+def to_coco(image_filenames, inference_output, class_names):
+    """
+    TODO
+    """
+    categories = []
+    for i, class_name in enumerate(class_names):
+        categories.append(
+            {
+                "id": i,
+                "name": class_name
+            }
+        )
+
+    dataset = {
+        "info": [],
+        "licenses": [],
+        "categories": categories,
+        "images": [],
+        "annotations": []
+    }
+
+    num_annotations = 0
+    for i, image_output in enumerate(inference_output):
+        bbox_tlbr, class_prob, class_idx = image_output
+
+        # Assign an arbitrary id to the image.
+        image = {
+            "file_name": image_filenames[i],
+            "id": i,
+        }
+        dataset["images"].append(image)
+
+        for j, (tl_x, tl_y, br_x, br_y) in enumerate(bbox_tlbr):
+            tl_x = int(tl_x)
+            tl_y = int(tl_y)
+            br_x = int(br_x)
+            br_y = int(br_y)
+            w = br_x - tl_x
+            h = br_y - tl_y
+
+            ann = {
+                "image_id": i,
+                "bbox": [tl_x, tl_y, w, h],
+                "category_id": class_idx[j],
+                "id": num_annotations,
+                "score": float(class_prob[j]),
+                "area": w * h,
+            }
+            dataset["annotations"].append(ann)
+            num_annotations += 1
+
+    return dataset
 
 
 def detect_in_cam(
