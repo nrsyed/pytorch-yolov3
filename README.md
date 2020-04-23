@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/nrsyed/pytorch-yolov3.svg?branch=master)](https://travis-ci.com/nrsyed/pytorch-yolov3)
+
 ## Installation
 
 Python &ge; 3.6 required. Install the requirements and download weight files to
