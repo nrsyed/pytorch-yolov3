@@ -7,9 +7,6 @@ import numpy as np
 
 
 def load_coco_dataset(path):
-    """
-    TODO
-    """
     with open(path, "r") as f:
         dataset = json.load(f)
     return dataset
@@ -20,11 +17,30 @@ def filter_dataset(
     min_anns=0, max_anns=None
 ):
     """
+    Filter images of a dataset based on the object categories and/or number
+    of annotations they contain.
+
     Args:
         dataset (dict): COCO dataset.
         desired_cats (List[int|str]): List of category names or ids that each
-            returned image must contain. If omitted, images are not filtered
-            by specific categories present.
+            returned image must contain.
+        min_cats (int): Minimum number of distinct object categories (classes)
+            in each returned image.
+        max_cats (int): Maximum number of distinct object categories (classes)
+            in each returned image. If None, all images with >min_cats
+            represented classes are included.
+        min_supercats (int): Minimum number of supercategories represented in
+            each returned image; if None, any number of supercategories are
+            allowed.
+        min_anns (int): Minimum number of annotations (objects) present in
+            each returned image.
+        max_anns (int): Maximum number of annotations (objects) presented in
+            each returned image; if None, all images with >min_anns
+            annotations are included.
+
+    Returns:
+        Dict representing filtered dataset containing only images (and their
+        annotations) matching the provided criteria.
     """
     # Mapping of category id to supercat name.
     cat_id_to_supercat = {
@@ -143,7 +159,12 @@ def unique_colors(num_colors):
 
 def draw_coco(dataset, image_dir):
     """
-    TODO
+    Display images from a COCO dataset with bboxes superimposed on them.
+    Similar to `inference.draw_boxes()`.
+
+    Args:
+        dataset (dict): Dict representing a COCO dataset.
+        image_dir (str): Path to directory of images from the COCO dataset.
     """
     import cv2
 
