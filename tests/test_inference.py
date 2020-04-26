@@ -4,10 +4,9 @@ import cv2
 import numpy as np
 from pycocotools import coco, cocoeval
 
-from darknet import Darknet
-import inference
+import yolov3
 
-from devtools import coco_util
+from yolov3.devtools import coco_util
 
 
 def test_bbox_coord_conversion():
@@ -21,22 +20,23 @@ def test_bbox_coord_conversion():
         [85, 192, 115, 208, 19000]
     ])
 
-    assert (inference.cxywh_to_tlbr(bbox_xywh) == bbox_tlbr).all()
+    assert (yolov3.cxywh_to_tlbr(bbox_xywh) == bbox_tlbr).all()
 
 
 def test_inference():
     """
     With a probability threshold ("score" threshold) of 0.2, the standard
     yolov3 model yields a "bbox" mAP @[IoU=0.50:0.95] of 0.33983872 on the 9
-    sample images from the COCO validation set as computed by pycocotools.
-    This test checks that the mAP is similar.
+    sample images from the COCO validation set as computed by pycocotools
+    (with a probability threshold of 0.2 and NMS IOU threshold of 0.3). This
+    test checks that the mAP is similar.
     """
     model = "yolov3"
     model_dir = "models"
     config_path = os.path.join(model_dir, model + ".cfg")
     weights_path = os.path.join(model_dir, model + ".weights")
 
-    net = Darknet(config_path, device="cpu")
+    net = yolov3.Darknet(config_path, device="cpu")
     net.load_weights(weights_path)
     net.eval()
 
@@ -53,13 +53,15 @@ def test_inference():
     results = []
     for image in images:
         results.extend(
-            inference.inference(net, image, device="cpu", prob_thresh=0.2)
+            yolov3.inference(
+                net, image, device="cpu", prob_thresh=0.2, nms_iou_thresh=0.3
+            )
         )
 
     with open("models/coco.names", "r") as f:
         class_names = [line.strip() for line in f.readlines()]
 
-    pred_dataset = inference.to_coco(fnames, results, class_names)
+    pred_dataset = yolov3.to_coco(fnames, results, class_names)
     truth_dataset = coco_util.load_coco_dataset("sample_dataset/sample.json")
 
     # Match predicted COCO dataset image ids and cat ids with original

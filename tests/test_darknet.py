@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-from darknet import Darknet
+from yolov3 import Darknet
 
 
 def get_test_data():

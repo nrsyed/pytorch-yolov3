@@ -6,8 +6,7 @@ import time
 import cv2
 import torch
 
-from darknet import Darknet
-import inference
+import yolov3
 
 
 def write_mp4(frames, fps, filepath):
@@ -33,7 +32,7 @@ def write_mp4(frames, fps, filepath):
     writer.release()
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
 
     source_ = parser.add_argument_group(title="input source [required]")
@@ -104,7 +103,7 @@ if __name__ == "__main__":
     if device.startswith("cuda") and not torch.cuda.is_available():
         device = "cpu"
 
-    net = Darknet(args["config"], device=device)
+    net = yolov3.Darknet(args["config"], device=device)
     net.load_weights(args["weights"])
     net.eval()
 
@@ -143,14 +142,14 @@ if __name__ == "__main__":
         results = []
         for image in images:
             results.extend(
-                inference.inference(
+                yolov3.inference(
                     net, image, device=device, prob_thresh=args["prob_thresh"],
                     nms_iou_thresh=args["iou_thresh"]
                 )
             )
 
         for image, (bbox_xywh, _, class_idx) in zip(images, results):
-            inference.draw_boxes(
+            yolov3.draw_boxes(
                 image, bbox_xywh, class_idx=class_idx, class_names=class_names
             )
             cv2.imshow("YOLOv3", image)
@@ -166,7 +165,7 @@ if __name__ == "__main__":
             # Wrap in try/except block so that output video is written
             # even if an error occurs while streaming webcam input.
             try:
-                inference.detect_in_cam(
+                yolov3.detect_in_cam(
                     net, cam_id=args["cam"], device=device,
                     prob_thresh=args["prob_thresh"],
                     nms_iou_thresh=args["iou_thresh"],
@@ -181,7 +180,7 @@ if __name__ == "__main__":
                     fps = 1 / ((time.time() - start_time) / len(frames))
                     write_mp4(frames, fps, args["output"])
         elif source == "video":
-            inference.detect_in_video(
+            yolov3.detect_in_video(
                 net, filepath=args["video"], device=device,
                 prob_thresh=args["prob_thresh"],
                 nms_iou_thresh=args["iou_thresh"], class_names=class_names,
