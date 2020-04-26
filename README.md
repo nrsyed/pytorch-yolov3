@@ -7,6 +7,7 @@ the network and has been tested with the yolov3, yolov3-tiny, and yolov3-spp
 models.
 
 <img src="doc/img/webcam_example.gif" /><br><br>
+[Link to webcam demo on YouTube](https://www.youtube.com/watch?v=wyKoi5Hc8WY)
 
 ## Requirements
 
