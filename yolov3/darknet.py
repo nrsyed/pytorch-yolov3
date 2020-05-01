@@ -32,11 +32,13 @@ class MaxPool2d(torch.nn.MaxPool2d):
 class YOLOLayer(torch.nn.Module):
     def __init__(self, anchors, mask, device="cpu"):
         """
-        anchors (list): List of bounding box anchors (2-tuples of floats).
-        mask (list): Anchor box indices (corresponding to `anchors`) for
-            which to make predictions, eg, [3, 4, 5] would indicate that only
-            `anchors[3:6]` should be used.
-        device (str): device (eg, "cpu", "cuda") on which to allocate tensors.
+        Args:
+            anchors (list): List of bounding box anchors (2-tuples of floats).
+            mask (list): Anchor box indices (corresponding to `anchors`) for
+                which to make predictions, eg, [3, 4, 5] would indicate that
+                only `anchors[3:6]` should be used.
+            device (str): device (eg, "cpu", "cuda") on which to allocate
+                tensors.
         """
         super().__init__()
         self.anchors = [anchors[anchor_idx] for anchor_idx in mask]
@@ -49,8 +51,8 @@ class YOLOLayer(torch.nn.Module):
         probability, and class index.
 
         Returns:
-            bbox_xywh: NxMx4 tensor of M detections, where dim 2 indices
-                correspond to: center x, center y, width, height.
+            bbox_xywh: NxMx4 tensor of N batches and M detections, where dim 2
+                indices correspond to: center x, center y, width, height.
                 0 <= x, y <= 1 (fractions of image size). w and h are integer
                 values in pixels and should be scaled to net info training
                 image width/height.
@@ -73,7 +75,7 @@ class YOLOLayer(torch.nn.Module):
 
         bbox_xywh = xywh_energy.clone().detach()
 
-        # Cell offsets C_x and C_y.
+        # Cell offsets C_x and C_y from original paper.
         cx = torch.linspace(0, w - 1, w, device=self.device).repeat(h, 1)
         cy = torch.linspace(
             0, h - 1, h, device=self.device
@@ -83,7 +85,7 @@ class YOLOLayer(torch.nn.Module):
         bbox_xywh[:, :, 0, :, :].sigmoid_().add_(cx).div_(w)
         bbox_xywh[:, :, 1, :, :].sigmoid_().add_(cy).div_(h)
 
-        # Anchor priors P_w and P_h.
+        # Anchor priors (P_w and P_h in original paper).
         anchors = self.anchors
 
         anchor_w = torch.tensor(
@@ -129,7 +131,13 @@ def parse_config(fpath):
         fpath (str): Path to Darknet .cfg file.
 
     Returns:
-        List of blocks and network info.
+        blocks (List[dict]): List of blocks (as dicts). Each block from the
+            .cfg file is represented as a dict, e.g.:
+            {
+                'type': 'convolutional', 'batch_normalize': 1, 'filters': 32,
+                'size': 3, 'stride': 1, 'pad': 1, 'activation': 'leaky'
+            }
+        net_info (dict): Dict of info from '[net]' block of .cfg file.
     """
 
     with open(fpath, "r") as f:
