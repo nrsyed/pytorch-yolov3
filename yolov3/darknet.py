@@ -67,7 +67,7 @@ class YOLOLayer(torch.nn.Module):
         num_classes = int(num_predictions / num_anchors) - 5
         x = x.reshape((batch_size, num_anchors, num_classes + 5, h, w))
 
-        # Indices 0-3 corresponds to xywh energies, index 4 corresponds to
+        # Indices 0-3 correspond to xywh energies, index 4 corresponds to
         # objectness energy, and 5: correspond to class energies.
         xywh_energy = x[:, :, 0:4, :, :]
         obj_energy = x[:, :, 4:5, :, :]
