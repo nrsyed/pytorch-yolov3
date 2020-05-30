@@ -13,6 +13,8 @@ Thread both (get and show in separate threads; process in main thread):
   * yolov3: 26.5
   * yolov3-tiny: 147.3
 * GTX 950
+  * yolov3: 6.8
+  * yolov3-tiny: 61.2
 * CPU
 	* yolov3: 1.5
 	* yolov3-tiny: 13.1
@@ -22,6 +24,8 @@ Thread get (get frames in separate thread; process and show in main thread):
   * yolov3: 25.1
   * yolov3-tiny: 107.6
 * GTX 950
+  * yolov3: 7.4
+  * yolov3-tiny: 55.5
 * CPU
 	* yolov3: 1.4
 	* yolov3-tiny: 12.2
@@ -31,6 +35,8 @@ Thread show (show frames in separate thread; get and process in main thread):
   * yolov3: 14.4
   * yolov3-tiny: 14.7
 * GTX 950
+  * yolov3: 7.5
+  * yolov3-tiny: 14.6
 * CPU
 	* yolov3: 1.5
 	* yolov3-tiny: 13.2
@@ -40,6 +46,8 @@ Single thread (get, process, and show frames in single thread):
   * yolov3: 14.3
   * yolov3-tiny: 14.4
 * GTX 950
+  * yolov3: 7.3
+  * yolov3-tiny: 14.4
 * CPU
 	* yolov3: 1.4
 	* yolov3-tiny: 13.0
