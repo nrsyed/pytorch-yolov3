@@ -368,97 +368,16 @@ def inference(
     return results
 
 
-def to_coco(image_filenames, inference_output, class_names):
-    """
-    Convert output from `inference()` to a COCO dataset.
-
-    Args:
-        image_filenames (List[str]): list of image filenames corresponding to
-            each element of `inference_output`.
-        inference_output (list): List of (bbox_xywh, class_prob, class_idx)
-            tuples for each image processed by `inference()`.
-        class_names (List[str]): List of class names.
-
-    Returns:
-        Dict representing a COCO object detection dataset.
-    """
-    categories = []
-    for i, class_name in enumerate(class_names):
-        categories.append(
-            {
-                "id": i,
-                "name": class_name
-            }
-        )
-
-    dataset = {
-        "info": [],
-        "licenses": [],
-        "categories": categories,
-        "images": [],
-        "annotations": []
-    }
-
-    num_annotations = 0
-    for i, image_output in enumerate(inference_output):
-        bbox_tlbr, class_prob, class_idx = image_output
-
-        # Assign an arbitrary id to the image.
-        image = {
-            "file_name": image_filenames[i],
-            "id": i,
-        }
-        dataset["images"].append(image)
-
-        for j, (tl_x, tl_y, br_x, br_y) in enumerate(bbox_tlbr):
-            tl_x = int(tl_x)
-            tl_y = int(tl_y)
-            br_x = int(br_x)
-            br_y = int(br_y)
-            w = br_x - tl_x
-            h = br_y - tl_y
-
-            ann = {
-                "image_id": i,
-                "bbox": [tl_x, tl_y, w, h],
-                "category_id": class_idx[j],
-                "id": num_annotations,
-                "score": float(class_prob[j]),
-                "area": w * h,
-            }
-            dataset["annotations"].append(ann)
-            num_annotations += 1
-
-    return dataset
-
-
-def detect_in_cam(
+def cam_thread_both(
     net, cam_id=0, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
-    class_names=None, show_fps=False, frames=None
+    class_names=None, frames=None
 ):
     """
-    Run and display real-time inference on a webcam stream.
-
-    Performs inference on a webcam stream, draw bounding boxes on the frame,
-    and display the resulting video in real time.
-
-    Args:
-        net (torch.nn.Module): Instance of network class.
-        cam_id (int): Camera device id.
-        device (str): Device for inference (eg, "cpu", "cuda").
-        prob_thresh (float): Detection probability threshold.
-        nms_iou_thresh (float): NMS IOU threshold.
-        class_names (list): List of all model class names in order.
-        show_fps (bool): Display current frames processed per second.
-        frames (list): Optional list to populate with frames being displayed;
-            can be used to write or further process frames after this function
-            completes. Because mutables (like lists) are passed by reference
-            and are modified in-place, this function has no return value.
+    Get and show frames in separate threads. Main thread performs processing.
     """
     video_getter = VideoGetter(cam_id).start()
     video_shower = VideoShower(video_getter.frame, "YOLOv3").start()
 
-    # Number of frames to average for computing FPS.
     num_fps_frames = 30
     previous_fps = deque(maxlen=num_fps_frames)
 
@@ -479,12 +398,11 @@ def detect_in_cam(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
 
-        if show_fps:
-            cv2.putText(
-                frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
-                (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
-                (255, 255, 255)
-            )
+        cv2.putText(
+            frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+            (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+            (255, 255, 255)
+        )
 
         video_shower.frame = frame
         if frames is not None:
@@ -493,34 +411,110 @@ def detect_in_cam(
         previous_fps.append(int(1 / (time.time() - loop_start_time)))
 
 
-def detect_in_video(
-    net, filepath, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
-    class_names=None, frames=None, show_video=True
+def cam_thread_get(
+    net, cam_id=0, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    class_names=None, frames=None
 ):
     """
-    Run and optionally display inference on a video file.
-
-    Performs inference on a video, draw bounding boxes on the frame,
-    and optionally display the resulting video.
-
-    Args:
-        net (torch.nn.Module): Instance of network class.
-        filepath (str): Path to video file.
-        device (str): Device for inference (eg, "cpu", "cuda").
-        prob_thresh (float): Detection probability threshold.
-        nms_iou_thresh (float): NMS IOU threshold.
-        cam_id (int): Camera device id.
-        class_names (list): List of all model class names in order.
-        frames (list): Optional list to populate with frames being displayed;
-            can be used to write or further process frames after this function
-            completes. Because mutables (like lists) are passed by reference
-            and are modified in-place, this function has no return value.
-        show_video (bool): Whether to display output while processing.
+    Get frames in separate threads. Main thread performs processing and
+    shows frames.
     """
-    cap = cv2.VideoCapture(filepath)
+    video_getter = VideoGetter(cam_id).start()
+
+    num_fps_frames = 30
+    previous_fps = deque(maxlen=num_fps_frames)
 
     while True:
+        loop_start_time = time.time()
+
+        if video_getter.stopped:
+            break
+
+        frame = video_getter.frame
+        bbox_tlbr, _, class_idx = inference(
+            net, frame, device=device, prob_thresh=prob_thresh,
+            nms_iou_thresh=nms_iou_thresh
+        )[0]
+        draw_boxes(
+            frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
+        )
+
+        cv2.putText(
+            frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+            (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+            (255, 255, 255)
+        )
+
+        cv2.imshow("YOLOv3", frame)
+        if cv2.waitKey(1) == ord("q"):
+            break
+
+        if frames is not None:
+            frames.append(frame)
+
+        previous_fps.append(int(1 / (time.time() - loop_start_time)))
+
+    video_getter.stop()
+    cv2.destroyWindow("YOLOv3")
+
+
+def cam_thread_show(
+    net, cam_id=0, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    class_names=None, frames=None
+):
+    """
+    Show frames in separate thread. Main thread gets frames and performs
+    processing.
+    """
+    cap = cv2.VideoCapture(cam_id)
+    grabbed, frame = cap.read()
+    video_shower = VideoShower(frame, "YOLOv3").start()
+
+    num_fps_frames = 30
+    previous_fps = deque(maxlen=num_fps_frames)
+
+    while True:
+        loop_start_time = time.time()
         grabbed, frame = cap.read()
+
+        if not grabbed or video_shower.stopped:
+            break
+
+        bbox_tlbr, _, class_idx = inference(
+            net, frame, device=device, prob_thresh=prob_thresh,
+            nms_iou_thresh=nms_iou_thresh
+        )[0]
+        draw_boxes(
+            frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
+        )
+
+        cv2.putText(
+            frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+            (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+            (255, 255, 255)
+        )
+
+        video_shower.frame = frame
+
+        if frames is not None:
+            frames.append(frame)
+
+        previous_fps.append(int(1 / (time.time() - loop_start_time)))
+
+
+def cam_single_thread(
+    net, cam_id=0, device="cuda", prob_thresh=0.05, nms_iou_thresh=0.3,
+    class_names=None, frames=None
+):
+    cap = cv2.VideoCapture(cam_id)
+
+    num_fps_frames = 30
+    previous_fps = deque(maxlen=num_fps_frames)
+
+    while True:
+        loop_start_time = time.time()
+        grabbed, frame = cap.read()
+
         if not grabbed:
             break
 
@@ -532,13 +526,19 @@ def detect_in_video(
             frame, bbox_tlbr, class_idx=class_idx, class_names=class_names
         )
 
+        cv2.putText(
+            frame,  f"{int(sum(previous_fps) / num_fps_frames)} fps",
+            (2, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.9,
+            (255, 255, 255)
+        )
+
+        cv2.imshow("YOLOv3", frame)
+        if cv2.waitKey(1) == ord("q"):
+            break
+
         if frames is not None:
             frames.append(frame)
 
-        if show_video:
-            cv2.imshow("YOLOv3", frame)
-            if cv2.waitKey(1) == ord("q"):
-                break
+        previous_fps.append(int(1 / (time.time() - loop_start_time)))
 
-    cap.release()
-    cv2.destroyAllWindows()
+    cv2.destroyWindow("YOLOv3")
