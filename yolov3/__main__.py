@@ -88,6 +88,9 @@ def main():
         "--show-fps", action="store_true",
         help="Display frames processed per second (for --cam input)."
     )
+    other_args.add_argument(
+        "-v", "--verbose", action="store_true", help="Verbose output"
+    )
 
     args = vars(parser.parse_args())
 
@@ -109,6 +112,13 @@ def main():
 
     if device.startswith("cuda"):
         net.cuda(device=device)
+
+    if args["verbose"]:
+        if device == "cpu":
+            device_name = "CPU"
+        else:
+            device_name = torch.cuda.get_device_name(net.device)
+        print(f"Running model on {device_name}")
 
     class_names = None
     if args["class_names"] is not None and os.path.isfile(args["class_names"]):
