@@ -2,6 +2,7 @@ import argparse
 import os
 import pathlib
 import time
+import warnings
 
 import cv2
 import torch
@@ -104,6 +105,11 @@ def main():
 
     device = args["device"]
     if device.startswith("cuda") and not torch.cuda.is_available():
+        warnings.warn(
+            "CUDA not available; falling back to CPU. Pass `-d cpu` or ensure "
+            "compatible versions of CUDA and pytorch are installed.",
+            RuntimeWarning, stacklevel=2
+        )
         device = "cpu"
 
     net = yolov3.Darknet(args["config"], device=device)
