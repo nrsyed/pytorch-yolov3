@@ -9,6 +9,10 @@ models.
 <img src="doc/img/webcam_example.gif" /><br><br>
 [Link to webcam demo on YouTube](https://www.youtube.com/watch?v=wyKoi5Hc8WY)
 
+A more detailed treatment of YOLOv3 and the code in this repo can be found in
+the blog posts at
+[nrsyed.com](https://nrsyed.com/2020/04/28/a-pytorch-implementation-of-yolov3-for-real-time-object-detection-part-1/)
+
 ## Requirements
 
 + Python &ge; 3.6
@@ -77,11 +81,11 @@ The following arguments are always required:
 
 + `-d`/`--device` `<device>`: Device on which to load the model (e.g., `cpu`,
 	`cuda`, `cuda:1`)
-+ `-h`/`--help`: Display help message.
++ `-h`/`--help`: Display help message and exit.
 + `-i`/`--iou-thresh` `<iou>`: Non-maximum suppression IOU threshold.
 + `-n`/`--class-names` `<path>`: Path to text file of class names containing
-	one class name per line. If omitted, the class index is displayed on
-	the resulting image instead of the class name.
+	one class name per line. If omitted, the class indices are displayed next to
+	the bounding boxes in the resulting image instead of the class names.
 + `-p`/`--prob-thresh` `<prob>`: Detection probability threshold; predictions
 	with a computed probability below this threshold are ignored.
 + `-o`/`--output` `<path>`: Path for output video file (use with `--cam` or
